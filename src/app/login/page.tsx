@@ -1,16 +1,71 @@
 "use client";
 
+import { useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 
+// Functional skeleton for FE02: logic is done, styling (CSS/Tailwind) is left to FE.
 export default function LoginPage() {
-  const signIn = (provider: "google" | "facebook") => authClient.signIn.social({ provider, callbackURL: "/dashboard" });
-  return <main className="grid min-h-screen place-items-center px-6"><section className="w-full max-w-md rounded-2xl bg-white p-8 shadow-sm">
-    <a href="/" className="text-sm font-semibold text-indigo-600">← CM Learn</a>
-    <h1 className="mt-7 text-2xl font-bold">เข้าสู่ระบบ</h1><p className="mt-2 text-sm text-slate-600">ใช้บัญชี Google หรือ Facebook เพื่อเข้าใช้งาน</p>
-    <div className="mt-7 grid gap-3">
-      <button onClick={() => signIn("google")} className="rounded-lg border border-slate-300 px-4 py-3 font-medium hover:bg-slate-50">ดำเนินการต่อด้วย Google</button>
-      <button onClick={() => signIn("facebook")} className="rounded-lg border border-slate-300 px-4 py-3 font-medium hover:bg-slate-50">ดำเนินการต่อด้วย Facebook</button>
-    </div>
-    <p className="mt-6 text-xs leading-5 text-slate-500">การเข้าสู่ระบบแสดงว่าคุณยอมรับเงื่อนไขการใช้งานและนโยบายความเป็นส่วนตัว</p>
-  </section></main>;
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    const form = new FormData(event.currentTarget);
+    const { error } = await authClient.signIn.email({
+      email: String(form.get("email")),
+      password: String(form.get("password")),
+    });
+
+    setLoading(false);
+    if (error) {
+      setError(
+        error.code === "INVALID_EMAIL_OR_PASSWORD"
+          ? "อีเมลหรือรหัสผ่านไม่ถูกต้อง"
+          : (error.message ?? "เข้าสู่ระบบไม่สำเร็จ"),
+      );
+      return;
+    }
+    router.push("/dashboard");
+    router.refresh(); // re-run server components so they see the new session cookie
+  }
+
+  const signInSocial = (provider: "google" | "facebook") =>
+    authClient.signIn.social({ provider, callbackURL: "/dashboard" });
+
+  return (
+    <main>
+      <Link href="/">← CM Learn</Link>
+      <h1>เข้าสู่ระบบ</h1>
+
+      {/* method="post": if JS has not loaded yet, the browser must never put the password in the URL (GET). */}
+      <form method="post" onSubmit={handleSubmit}>
+        <label>
+          อีเมล
+          <input name="email" type="email" autoComplete="email" required />
+        </label>
+        <label>
+          รหัสผ่าน
+          <input name="password" type="password" autoComplete="current-password" required />
+        </label>
+        {error && <p role="alert">{error}</p>}
+        <button type="submit" disabled={loading}>
+          {loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+        </button>
+      </form>
+
+      <p>
+        ยังไม่มีบัญชี? <Link href="/register">สมัครสมาชิก</Link>
+      </p>
+
+      <p>หรือ</p>
+      <button type="button" onClick={() => signInSocial("google")}>ดำเนินการต่อด้วย Google</button>
+      <button type="button" onClick={() => signInSocial("facebook")}>ดำเนินการต่อด้วย Facebook</button>
+    </main>
+  );
 }
