@@ -1,0 +1,40 @@
+erDiagram
+    USER ||--o{ SUBJECT : owns
+    USER ||--o{ COMMENT : writes
+    SUBJECT ||--o{ COMMENT : receives
+    COMMENT o|--o{ COMMENT : replies_to
+    USER ||--o{ SHEET_REACTION : reacts
+    SUBJECT ||--o{ SHEET_REACTION : receives
+
+    USER {
+        text id PK
+        text name
+        text email UK
+    }
+
+    SUBJECT {
+        text id PK
+        text owner_id FK
+        text title
+        boolean is_published
+        timestamptz deleted_at
+    }
+
+    COMMENT {
+        text id PK
+        text sheet_id FK
+        text author_id FK
+        text parent_comment_id FK "nullable"
+        text body
+        timestamptz created_at
+        timestamptz updated_at
+        timestamptz deleted_at "soft delete"
+    }
+
+    SHEET_REACTION {
+        text user_id PK, FK
+        text sheet_id PK, FK
+        text reaction "like or dislike"
+        timestamptz created_at
+        timestamptz updated_at
+    }
