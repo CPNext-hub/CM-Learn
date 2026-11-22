@@ -1,9 +1,12 @@
 import { redirect } from "next/navigation";
+import Navbar from "@/components/layout/Navbar";
+import Footer from "@/components/layout/Footer";
 import { getSession } from "@/lib/session";
 
+// Admin area: checked on the server — hiding a link in the UI is not access control.
 export default async function AdminPage() {
   const session = await getSession();
   if (!session) redirect("/login");
-  if (session.user.role !== "admin") redirect("/dashboard");
-  return <main className="mx-auto min-h-screen max-w-5xl px-6 py-10"><p className="text-sm font-semibold text-indigo-600">Admin</p><h1 className="mt-2 text-3xl font-bold">จัดการระบบ</h1><p className="mt-3 text-slate-600">พื้นที่สำหรับจัดการผู้ใช้ วิชา และเนื้อหา</p></main>;
+  if (session.user.role !== "admin") redirect("/my-sheets");
+  return <main className="site-frame"><Navbar /><section className="page-surface" /><Footer /></main>;
 }
