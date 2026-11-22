@@ -2,7 +2,7 @@
 
 These Next.js Route Handlers expose the BE 02 endpoints under `/api/v1`. The
 existing app uses `subject` as its sheet record, so `{id}` and `:sheetId` refer
-to `subject.id`. Mutating endpoints require the existing Better Auth session.
+to `sheets.id`. Mutating endpoints require the existing Better Auth session.
 
 | Method | Endpoint | Body |
 | --- | --- | --- |
@@ -23,7 +23,7 @@ to `subject.id`. Mutating endpoints require the existing Better Auth session.
 | GET | `/users/me/dashboard` | — |
 
 Successful responses use `{ "data": ... }`; errors use
-`{ "error": { "message": ... } }`. See `src/db/migrations/0001_interactions.sql`
+`{ "error": { "message": ... } }`. See `src/db/migrations/0003_interactions.sql`
 for the schema changes. Apply migrations using `npm run db:migrate`.
 
 The dashboard returns sheet totals, published sheet totals, total views,

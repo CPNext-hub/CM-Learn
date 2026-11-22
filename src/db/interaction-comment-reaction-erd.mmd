@@ -1,10 +1,12 @@
 erDiagram
-    USER ||--o{ SUBJECT : owns
-    USER ||--o{ COMMENT : writes
-    SUBJECT ||--o{ COMMENT : receives
-    COMMENT o|--o{ COMMENT : replies_to
-    USER ||--o{ SHEET_REACTION : reacts
-    SUBJECT ||--o{ SHEET_REACTION : receives
+    USER ||--o{ SHEETS : owns
+    SUBJECTS ||--o{ SHEETS : classifies
+    CATEGORIES ||--o{ SHEETS : categorizes
+    USER ||--o{ COMMENTS : writes
+    SHEETS ||--o{ COMMENTS : receives
+    COMMENTS o|--o{ COMMENTS : replies_to
+    USER ||--o{ SHEET_REACTIONS : reacts
+    SHEETS ||--o{ SHEET_REACTIONS : receives
 
     USER {
         text id PK
@@ -12,28 +14,41 @@ erDiagram
         text email UK
     }
 
-    SUBJECT {
-        text id PK
+    SUBJECTS {
+        uuid id PK
+        text name UK
+    }
+
+    CATEGORIES {
+        uuid id PK
+        text name UK
+    }
+
+    SHEETS {
+        uuid id PK
         text owner_id FK
+        uuid subject_id FK
+        uuid category_id FK
         text title
-        boolean is_published
+        text status
+        bigint view_count
         timestamptz deleted_at
     }
 
-    COMMENT {
-        text id PK
-        text sheet_id FK
+    COMMENTS {
+        uuid id PK
+        uuid sheet_id FK
         text author_id FK
-        text parent_comment_id FK "nullable"
+        uuid parent_comment_id FK "nullable"
         text body
         timestamptz created_at
         timestamptz updated_at
-        timestamptz deleted_at "soft delete"
+        timestamptz deleted_at
     }
 
-    SHEET_REACTION {
+    SHEET_REACTIONS {
         text user_id PK, FK
-        text sheet_id PK, FK
+        uuid sheet_id PK, FK
         text reaction "like or dislike"
         timestamptz created_at
         timestamptz updated_at
