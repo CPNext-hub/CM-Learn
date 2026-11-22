@@ -1,7 +1,7 @@
 import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { categories, comments, sheetFiles, sheetReactions, sheets, subjects, user, SHEET_STATUSES } from "@/db/schema";
-import { ApiError, isUuid, type SessionUser } from "@/lib/api";
+import { ApiError, isUuid, readJsonObject, readMultipart, type SessionUser } from "@/lib/api";
 import { kindForMime, MAX_UPLOAD_BYTES } from "@/lib/storage";
 
 // ---------------------------------------------------------------------------
@@ -234,83 +234,13 @@ export async function parseSheetInput(
   return input;
 }
 
-// Whole request may be the file plus form fields and multipart boundaries.
-const MAX_BODY_BYTES = MAX_UPLOAD_BYTES + 1024 * 1024;
-const MAX_JSON_BYTES = 64 * 1024;
-
-/**
- * Reads the raw body but stops as soon as it exceeds `limit`, answering 413.
- * Without this, request.formData() would buffer a 2 GB upload in memory BEFORE we could check its size.
- */
-async function readBodyWithLimit(
-  request: Request,
-  limit: number,
-  tooLarge: ApiError,
-): Promise<Uint8Array<ArrayBuffer>> {
-  // Fast path: an honest client tells us the size up front.
-  const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > limit) throw tooLarge;
-  if (!request.body) return new Uint8Array();
-
-  // Slow path: count bytes while reading (Content-Length can be missing or a lie).
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    received += value.byteLength;
-    if (received > limit) {
-      await reader.cancel();
-      throw tooLarge;
-    }
-    chunks.push(value);
-  }
-  const body = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
-}
-
 /** Reads the request body as fields + optional file, from either multipart/form-data or JSON. */
 export async function readSheetBody(request: Request): Promise<{ fields: Record<string, unknown>; file: File | null }> {
   const type = request.headers.get("content-type") ?? "";
   if (type.includes("multipart/form-data")) {
-    const raw = await readBodyWithLimit(
-      request,
-      MAX_BODY_BYTES,
-      new ApiError("FILE_TOO_LARGE", `ไฟล์ต้องมีขนาดไม่เกิน ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`),
-    );
-    // Parse the bounded bytes with the same multipart parser the platform uses.
-    const form = await new Response(raw, { headers: { "content-type": type } }).formData().catch(() => {
-      throw new ApiError("VALIDATION_ERROR", "ข้อมูล multipart ไม่ถูกต้อง");
-    });
-    const fields: Record<string, unknown> = {};
-    let file: File | null = null;
-    for (const [key, value] of form.entries()) {
-      if (key === "file") {
-        if (typeof value !== "string" && value.size > 0) file = value;
-      } else if (typeof value === "string") {
-        fields[key] = value;
-      }
-    }
-    return { fields, file };
+    // Whole request may be the file plus form fields and multipart boundaries.
+    return readMultipart(request, MAX_UPLOAD_BYTES + 1024 * 1024, `ไฟล์ต้องมีขนาดไม่เกิน ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`);
   }
-  if (type.includes("application/json")) {
-    const raw = await readBodyWithLimit(request, MAX_JSON_BYTES, new ApiError("VALIDATION_ERROR", "ข้อมูลใหญ่เกินไป"));
-    let body: unknown;
-    try {
-      body = JSON.parse(new TextDecoder().decode(raw));
-    } catch {
-      throw new ApiError("VALIDATION_ERROR", "JSON ไม่ถูกต้อง");
-    }
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      throw new ApiError("VALIDATION_ERROR", "body ต้องเป็น JSON object");
-    }
-    return { fields: body as Record<string, unknown>, file: null };
-  }
+  if (type.includes("application/json")) return { fields: await readJsonObject(request), file: null };
   throw new ApiError("VALIDATION_ERROR", "Content-Type ต้องเป็น multipart/form-data หรือ application/json");
 }

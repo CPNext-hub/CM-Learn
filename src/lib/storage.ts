@@ -105,24 +105,30 @@ function sniff(bytes: Uint8Array): FileKind | null {
 
 export type ValidatedFile = { bytes: Uint8Array; kind: FileKind };
 
-/** Checks size and real type of an uploaded file. Throws 400/413/415 ApiError. */
-export async function validateUpload(file: File): Promise<ValidatedFile> {
+// Profile pictures: images only, small.
+export const AVATAR_KINDS = [PNG, JPEG, WEBP];
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+type UploadRules = { kinds: FileKind[]; maxBytes: number; allowedLabel: string };
+const SHEET_RULES: UploadRules = { kinds: KINDS, maxBytes: MAX_UPLOAD_BYTES, allowedLabel: ALLOWED_EXTENSIONS.join(", ") };
+export const AVATAR_RULES: UploadRules = { kinds: AVATAR_KINDS, maxBytes: AVATAR_MAX_BYTES, allowedLabel: ".png, .jpg, .jpeg, .webp" };
+
+/** Checks size and real type of an uploaded file. Throws 400/413/415 ApiError. Defaults to sheet-file rules. */
+export async function validateUpload(file: File, rules: UploadRules = SHEET_RULES): Promise<ValidatedFile> {
   if (file.size === 0) throw new ApiError("VALIDATION_ERROR", "ไฟล์ว่างเปล่า", { file: "ไฟล์ว่างเปล่า" });
-  if (file.size > MAX_UPLOAD_BYTES) {
-    throw new ApiError("FILE_TOO_LARGE", `ไฟล์ต้องมีขนาดไม่เกิน ${MAX_UPLOAD_MB} MB`);
+  if (file.size > rules.maxBytes) {
+    throw new ApiError("FILE_TOO_LARGE", `ไฟล์ต้องมีขนาดไม่เกิน ${rules.maxBytes / 1024 / 1024} MB`);
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
   const kind = sniff(bytes);
-  if (!kind) {
-    throw new ApiError(
-      "UNSUPPORTED_FILE_TYPE",
-      `รองรับเฉพาะไฟล์ ${ALLOWED_EXTENSIONS.join(", ")}`,
-    );
+  if (!kind || !rules.kinds.includes(kind)) {
+    throw new ApiError("UNSUPPORTED_FILE_TYPE", `รองรับเฉพาะไฟล์ ${rules.allowedLabel}`);
   }
   return { bytes, kind };
 }
 
 export const kindForMime = (mime: string) => KINDS.find((k) => k.mime === mime);
+export const kindForExt = (ext: string) => KINDS.find((k) => k.ext === ext);
 
 /** Resolves a storage key to a path and refuses anything that escapes UPLOAD_ROOT (path traversal). */
 function resolveKey(key: string): string {
@@ -131,9 +137,12 @@ function resolveKey(key: string): string {
   return fullPath;
 }
 
-/** Saves bytes and returns the generated storage key. The key is internal: never send it to clients. */
-export async function saveFile(sheetId: string, file: ValidatedFile): Promise<string> {
-  const key = `sheets/${sheetId}/${randomUUID()}${file.kind.ext}`;
+/**
+ * Saves bytes under `folder` (e.g. "sheets/<id>" or "avatars/<userId>") with a random file name
+ * and returns the storage key. The key is internal: never send it to clients.
+ */
+export async function saveFile(folder: string, file: ValidatedFile): Promise<string> {
+  const key = `${folder}/${randomUUID()}${file.kind.ext}`;
   const fullPath = resolveKey(key);
   await mkdir(path.dirname(fullPath), { recursive: true });
   await writeFile(fullPath, file.bytes, { flag: "wx" }); // wx = fail instead of overwriting

@@ -11,7 +11,8 @@ export default function TestLayout({ children }: { children: ReactNode }) {
     <div style={{ fontFamily: "sans-serif", padding: 16, maxWidth: 960 }}>
       <p>
         <b>[หน้าทดสอบ BE]</b> <Link href="/test">หน้าแรก</Link> | <Link href="/test/sheets">ชีททั้งหมด</Link> |{" "}
-        <Link href="/test/upload">อัปโหลด</Link> | <Link href="/test/my-sheets">ชีทของฉัน</Link>
+        <Link href="/test/upload">อัปโหลด</Link> | <Link href="/test/my-sheets">ชีทของฉัน</Link> |{" "}
+        <Link href="/test/profile">โปรไฟล์</Link>
       </p>
       <SessionBar />
       <hr />

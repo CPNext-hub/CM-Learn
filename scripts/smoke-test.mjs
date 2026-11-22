@@ -405,6 +405,78 @@ async function main() {
   check("status ผิด → 400", (await alice.req("/api/v1/users/me/sheets?status=x")).status === 400);
   check("guest → 401", (await guest.req("/api/v1/users/me/sheets")).status === 401);
 
+  // ----------------------------------------------------------------- Profile
+  group("Profile");
+  const aliceId = (await alice.req("/api/auth/get-session")).json.user.id;
+  const bobId = (await bob.req("/api/auth/get-session")).json.user.id;
+  check("guest GET /users/me → 401", (await guest.req("/api/v1/users/me")).status === 401);
+  check("guest PATCH /users/me → 401", (await guest.req("/api/v1/users/me", { method: "PATCH", json: { name: "x" } })).status === 401);
+  check("guest POST avatar → 401", (await guest.req("/api/v1/users/me/avatar", { method: "POST", form: sheetForm({}, FILES.png) })).status === 401);
+
+  r = await alice.req("/api/v1/users/me");
+  const profile = r.json?.data;
+  check("GET /users/me → 200 พร้อม email/name", r.status === 200 && profile?.email === emailA && profile?.name === "Alice ทดสอบ");
+  check("โปรไฟล์ใหม่: image และ bio เป็น null", profile?.image === null && profile?.bio === null);
+
+  // a Like from Bob on one of Alice's sheets, inserted directly (the Reaction API belongs to BE02)
+  await sql`insert into sheet_reactions (user_id, sheet_id, reaction) values (${bobId}, ${created.pdf.id}, 'like')`;
+  const [expected] = await sql`select count(*)::int as sheets, count(*) filter (where status = 'published')::int as published,
+    coalesce(sum(view_count), 0)::int as views from sheets where owner_id = ${aliceId} and deleted_at is null`;
+  r = await alice.req("/api/v1/users/me");
+  const stats = r.json?.data?.stats;
+  check("stats ตรงกับข้อมูลใน DB", stats?.sheetCount === expected.sheets && stats?.publishedCount === expected.published && stats?.totalViews === expected.views,
+    JSON.stringify({ stats, expected }));
+  check("stats.likeCount นับ Like ที่ได้รับ", stats?.likeCount === 1, `got ${stats?.likeCount}`);
+
+  r = await alice.req("/api/v1/users/me", { method: "PATCH", json: { name: "  Alice ใหม่  ", bio: "ชอบสรุปคณิต" } });
+  check("PATCH name + bio → trim และบันทึก", r.status === 200 && r.json.data.name === "Alice ใหม่" && r.json.data.bio === "ชอบสรุปคณิต");
+  check("ชื่อใหม่เห็นใน session ด้วย", (await alice.req("/api/auth/get-session")).json?.user?.name === "Alice ใหม่");
+  r = await alice.req("/api/v1/users/me", { method: "PATCH", json: { bio: "" } });
+  check('bio "" → null', r.status === 200 && r.json.data.bio === null);
+  check("name ว่าง → 400", (await alice.req("/api/v1/users/me", { method: "PATCH", json: { name: "   " } })).status === 400);
+  check("name 101 ตัว → 400", (await alice.req("/api/v1/users/me", { method: "PATCH", json: { name: "ก".repeat(101) } })).status === 400);
+  check("bio 501 ตัว → 400", (await alice.req("/api/v1/users/me", { method: "PATCH", json: { bio: "ก".repeat(501) } })).status === 400);
+  r = await alice.req("/api/v1/users/me", { method: "PATCH", json: { role: "admin" } });
+  const [roleRow] = await sql`select role from "user" where id = ${aliceId}`;
+  check("ตั้งตัวเองเป็น admin ไม่ได้ → 400 และ role ใน DB ยังเป็น user", r.status === 400 && !!r.json?.error?.details?.role && roleRow.role === "user");
+  check("แก้ email ไม่ได้ → 400", (await alice.req("/api/v1/users/me", { method: "PATCH", json: { email: "x@y.z" } })).status === 400);
+  check("ตั้ง image เป็น URL เองไม่ได้ → 400", (await alice.req("/api/v1/users/me", { method: "PATCH", json: { image: "https://evil.example/x.png" } })).status === 400);
+  check("body ว่าง → 400", (await alice.req("/api/v1/users/me", { method: "PATCH", json: {} })).status === 400);
+  check("ไม่ใช่ JSON → 400", (await alice.req("/api/v1/users/me", { method: "PATCH", body: "name=x", headers: { "Content-Type": "text/plain" } })).status === 400);
+
+  group("Profile — รูปโปรไฟล์");
+  check("อัปโหลด PDF เป็นรูป → 415", (await alice.req("/api/v1/users/me/avatar", { method: "POST", form: sheetForm({}, FILES.pdf) })).status === 415);
+  check("อัปโหลด GIF → 415 (รับแค่ PNG/JPG/WEBP)", (await alice.req("/api/v1/users/me/avatar", { method: "POST", form: sheetForm({}, FILES.gif) })).status === 415);
+  const bigPng = new Uint8Array(2 * 1024 * 1024 + 10);
+  bigPng.set(PNG);
+  check("รูปเกิน 2 MB → 413", (await alice.req("/api/v1/users/me/avatar", { method: "POST", form: sheetForm({}, { bytes: bigPng, name: "big.png" }) })).status === 413);
+  check("ไม่แนบไฟล์ → 400", (await alice.req("/api/v1/users/me/avatar", { method: "POST", form: sheetForm({ x: "1" }) })).status === 400);
+
+  r = await alice.req("/api/v1/users/me/avatar", { method: "POST", form: sheetForm({}, FILES.png) });
+  const image1 = r.json?.data?.image;
+  check("อัปโหลด PNG → 200 และ image เป็น URL ของระบบ", r.status === 200 && image1?.startsWith(`/api/v1/users/${aliceId}/avatar?v=`), image1);
+  const av = await guest.req(image1);
+  check("ใครก็เปิดรูปได้ ไฟล์ตรงต้นฉบับ", av.status === 200 && sha(av.bytes) === sha(PNG));
+  check("รูป: Content-Type image/png + nosniff + cache", av.headers.get("content-type") === "image/png"
+    && av.headers.get("x-content-type-options") === "nosniff" && av.headers.get("cache-control")?.includes("public"));
+  const listed = (await guest.req(`/api/v1/sheets?q=${encodeURIComponent(`สรุป PDF ${RUN}`)}`)).json?.data?.[0];
+  check("sheet.owner.image แสดงรูปใหม่", listed?.owner?.image === image1);
+  const key1 = `avatars/${aliceId}/${image1.split("v=")[1]}`;
+  check("ไฟล์รูปอยู่บนดิสก์", existsSync(path.join(UPLOAD_ROOT, key1)));
+
+  r = await alice.req("/api/v1/users/me/avatar", { method: "POST", form: sheetForm({}, FILES.jpg) });
+  const image2 = r.json?.data?.image;
+  check("อัปโหลดรูปใหม่ (JPG) → URL เปลี่ยน", r.status === 200 && image2 !== image1 && image2.endsWith(".jpg"));
+  check("รูปเก่าถูกลบจากดิสก์", !existsSync(path.join(UPLOAD_ROOT, key1)));
+  check("URL ใหม่เปิดได้เป็น image/jpeg", (await guest.req(image2)).headers.get("content-type") === "image/jpeg");
+
+  check("ผู้ใช้ที่ไม่มีรูป → 404", (await guest.req(`/api/v1/users/${bobId}/avatar`)).status === 404);
+  check("user id แปลก ๆ → 404", (await guest.req("/api/v1/users/..%2F..%2Fetc/avatar")).status === 404);
+  r = await alice.req("/api/v1/users/me", { method: "PATCH", json: { image: null } });
+  check("PATCH image: null → ลบรูป", r.status === 200 && r.json.data.image === null);
+  check("ไฟล์รูปถูกลบจากดิสก์ และ URL เดิม → 404",
+    !existsSync(path.join(UPLOAD_ROOT, `avatars/${aliceId}/${image2.split("v=")[1]}`)) && (await guest.req(image2)).status === 404);
+
   // ----------------------------------------------------------------- Orphan files
   group("ไฟล์กำพร้า");
   const users = await sql`select id from "user" where email in ${sql(RUN_EMAILS)}`;
@@ -430,6 +502,7 @@ async function cleanup() {
   const sheets = await sql`delete from sheets where owner_id in ${sql(ids)} returning id`;
   await sql`delete from "user" where id in ${sql(ids)}`;
   for (const { id } of sheets) await rm(path.join(UPLOAD_ROOT, "sheets", id), { recursive: true, force: true });
+  for (const id of ids) await rm(path.join(UPLOAD_ROOT, "avatars", id), { recursive: true, force: true });
   console.log(`\n(ลบข้อมูลทดสอบ: ผู้ใช้ ${users.length} คน, ชีท ${sheets.length} รายการ)`);
 }
 

@@ -113,6 +113,94 @@ export function buildPagination(page: number, pageSize: number, total: number): 
   return { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
 }
 
+// ---------------------------------------------------------------------------
+// Reading request bodies safely (size-limited)
+// ---------------------------------------------------------------------------
+
+const MAX_JSON_BYTES = 64 * 1024;
+
+/**
+ * Reads the raw body but stops as soon as it exceeds `limit`, throwing `tooLarge`.
+ * Without this, request.formData() would buffer a 2 GB upload in memory BEFORE we could check its size.
+ */
+export async function readBodyWithLimit(
+  request: Request,
+  limit: number,
+  tooLarge: ApiError,
+): Promise<Uint8Array<ArrayBuffer>> {
+  // Fast path: an honest client tells us the size up front.
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) throw tooLarge;
+  if (!request.body) return new Uint8Array();
+
+  // Slow path: count bytes while reading (Content-Length can be missing or a lie).
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > limit) {
+      await reader.cancel();
+      throw tooLarge;
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
+/** Reads a multipart/form-data body (at most `maxBytes`) into text fields + the `file` field. */
+export async function readMultipart(
+  request: Request,
+  maxBytes: number,
+  tooLargeMessage: string,
+): Promise<{ fields: Record<string, unknown>; file: File | null }> {
+  const type = request.headers.get("content-type") ?? "";
+  if (!type.includes("multipart/form-data")) {
+    throw new ApiError("VALIDATION_ERROR", "Content-Type ต้องเป็น multipart/form-data");
+  }
+  const raw = await readBodyWithLimit(request, maxBytes, new ApiError("FILE_TOO_LARGE", tooLargeMessage));
+  // Parse the bounded bytes with the same multipart parser the platform uses.
+  const form = await new Response(raw, { headers: { "content-type": type } }).formData().catch(() => {
+    throw new ApiError("VALIDATION_ERROR", "ข้อมูล multipart ไม่ถูกต้อง");
+  });
+  const fields: Record<string, unknown> = {};
+  let file: File | null = null;
+  for (const [key, value] of form.entries()) {
+    if (key === "file") {
+      if (typeof value !== "string" && value.size > 0) file = value;
+    } else if (typeof value === "string") {
+      fields[key] = value;
+    }
+  }
+  return { fields, file };
+}
+
+/** Reads a JSON object body (at most 64 KB). */
+export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
+  if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
+    throw new ApiError("VALIDATION_ERROR", "Content-Type ต้องเป็น application/json");
+  }
+  const raw = await readBodyWithLimit(request, MAX_JSON_BYTES, new ApiError("VALIDATION_ERROR", "ข้อมูลใหญ่เกินไป"));
+  let body: unknown;
+  try {
+    body = JSON.parse(new TextDecoder().decode(raw));
+  } catch {
+    throw new ApiError("VALIDATION_ERROR", "JSON ไม่ถูกต้อง");
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new ApiError("VALIDATION_ERROR", "body ต้องเป็น JSON object");
+  }
+  return body as Record<string, unknown>;
+}
+
 /** Optional uuid filter from the query string: undefined when absent, 400 when malformed. */
 export function optionalUuidParam(params: URLSearchParams, name: string): string | undefined {
   const value = params.get(name)?.trim();

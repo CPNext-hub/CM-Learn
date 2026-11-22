@@ -19,6 +19,9 @@ export default function TestHome() {
         <li>
           <Link href="/test/my-sheets">ชีทของฉัน</Link> — ดูชีททุกสถานะของตัวเอง
         </li>
+        <li>
+          <Link href="/test/profile">โปรไฟล์</Link> — ดูสถิติ แก้ชื่อ/แนะนำตัว อัปโหลดหรือลบรูปโปรไฟล์
+        </li>
       </ol>
       <p>
         เอกสาร API: <code>docs/API.md</code>

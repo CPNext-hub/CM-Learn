@@ -74,7 +74,7 @@ export const PATCH = withErrors(async (request: Request, { params }: Ctx) => {
     throw new ApiError("VALIDATION_ERROR", "ต้องแนบไฟล์ก่อนเผยแพร่", { file: "กรุณาเลือกไฟล์" });
   }
 
-  const storageKey = validated ? await saveFile(id, validated) : null;
+  const storageKey = validated ? await saveFile(`sheets/${id}`, validated) : null;
   try {
     await getDb().transaction(async (tx) => {
       // updatedAt is set automatically by $onUpdate in the schema; set it explicitly when only a file changes.

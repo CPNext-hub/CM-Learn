@@ -63,7 +63,7 @@ export const POST = withErrors(async (request: Request) => {
   // Save the file first, then write both rows in ONE transaction.
   // If the database fails, remove the saved file so no orphan file is left on disk.
   const sheetId = randomUUID();
-  const storageKey = validated ? await saveFile(sheetId, validated) : null;
+  const storageKey = validated ? await saveFile(`sheets/${sheetId}`, validated) : null;
   try {
     await getDb().transaction(async (tx) => {
       await tx.insert(sheets).values({

@@ -123,8 +123,46 @@ Flow "Upload → กรอกรายละเอียด → Preview → Conf
 - Preview: `<iframe src={sheet.previewUrl}>` สำหรับ PDF หรือ `<img src={sheet.previewUrl}>` สำหรับรูป
 - สิทธิ์เหมือนหน้า Detail: ชีท draft/hidden ดาวน์โหลดได้เฉพาะเจ้าของ
 
+## Profile
+
+### `GET /api/v1/users/me` — โปรไฟล์ของตัวเอง (ต้อง login)
+```json
+{
+  "data": {
+    "id": "...", "name": "PA NU", "email": "panu@example.com",
+    "image": "/api/v1/users/<id>/avatar?v=<file>" | null,
+    "bio": "ชอบเรียนรู้เทคโนโลยี" | null,
+    "role": "user", "createdAt": "2026-11-21T05:00:00.000Z",
+    "stats": { "sheetCount": 12, "publishedCount": 10, "totalViews": 468, "likeCount": 24 }
+  }
+}
+```
+- `stats` นับเฉพาะชีทที่ยังไม่ถูกลบ: `sheetCount` = ทุกสถานะ, `publishedCount` = เผยแพร่, `totalViews` = ยอดดูรวม, `likeCount` = Like ที่ได้รับ
+- ยังไม่มียอดดาวน์โหลด (ระบบไม่ได้นับ) — ใช้ `totalViews` แทน
+
+### `PATCH /api/v1/users/me` — แก้โปรไฟล์ (JSON, ส่งเฉพาะช่องที่แก้)
+| ช่อง | กติกา |
+| --- | --- |
+| `name` | บังคับมีตัวอักษร, ไม่เกิน 100 |
+| `bio` | ไม่เกิน 500, ส่ง `null` หรือ `""` เพื่อล้าง |
+| `image` | ส่ง `null` เพื่อลบรูป (ตั้งรูปใหม่ใช้ endpoint avatar) |
+
+ช่องอื่น (`email`, `role`, …) → 400 · ตอบกลับเป็นโปรไฟล์ล่าสุด (รูปแบบเดียวกับ GET)
+หลังแก้ชื่อ ให้เรียก `refetch()` จาก `authClient.useSession()` เพื่อให้ Navbar แสดงชื่อใหม่
+
+### `POST /api/v1/users/me/avatar` — อัปโหลดรูปโปรไฟล์ (ต้อง login)
+`multipart/form-data` ช่อง `file` · PNG / JPG / WEBP ไม่เกิน 2 MB (ตรวจจากเนื้อไฟล์จริง) → โปรไฟล์ล่าสุด, `image` เป็น URL ใหม่ · รูปเดิมถูกลบให้อัตโนมัติ
+```js
+const form = new FormData();
+form.append("file", fileInput.files[0]);
+const res = await fetch("/api/v1/users/me/avatar", { method: "POST", body: form });
+```
+
+### รูปโปรไฟล์ในหน้าเว็บ
+ใช้ `image` ตรง ๆ: `<img src={profile.image}>` หรือ `<img src={sheet.owner.image}>` — เป็นได้ทั้ง URL ของเรา (`/api/v1/users/<id>/avatar?v=...` เปิดดูได้ทุกคน) หรือ URL ภายนอก (เช่นรูปจาก Google) · ถ้าเป็น `null` ให้แสดงตัวอักษรย่อของชื่อแทน
+
 ## ยังไม่มี (กำลังทำ)
-- `GET/PATCH /api/v1/users/me` (Profile) — BE01
+- โปรไฟล์สาธารณะของผู้ใช้อื่น `GET /api/v1/users/:id` — เลื่อนไปหลัง MVP
 - Comment / Reply / Like / Dislike — BE02
 
 ## ข้อจำกัดที่ FE ควรรู้
