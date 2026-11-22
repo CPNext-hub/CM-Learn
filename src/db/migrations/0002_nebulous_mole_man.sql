@@ -1,0 +1,1 @@
+ALTER TABLE "subject" ADD COLUMN "visibility" text DEFAULT 'private' NOT NULL;
