@@ -1,5 +1,8 @@
 import { redirect } from "next/navigation";
+import { getSession } from "@/lib/session";
 
-export default function HomePage() {
-  redirect("/login");
+// Until FE01's public Home page exists: members go to My Sheets, guests to the login page.
+export default async function HomePage() {
+  const session = await getSession();
+  redirect(session ? "/my-sheets" : "/login");
 }

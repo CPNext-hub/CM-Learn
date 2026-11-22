@@ -7,6 +7,15 @@ import { authClient } from "@/lib/auth-client";
 
 type AuthMode = "login" | "register";
 
+// Better Auth error codes → Thai messages (anything else falls back to the server message).
+const AUTH_ERRORS: Record<string, string> = {
+  INVALID_EMAIL_OR_PASSWORD: "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
+  USER_ALREADY_EXISTS: "อีเมลนี้ถูกใช้สมัครแล้ว",
+  USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "อีเมลนี้ถูกใช้สมัครแล้ว",
+  PASSWORD_TOO_SHORT: "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร",
+  INVALID_EMAIL: "รูปแบบอีเมลไม่ถูกต้อง",
+};
+
 export default function AuthCarousel({ initialMode }: { initialMode: AuthMode }) {
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [busy, setBusy] = useState(false);
@@ -42,7 +51,9 @@ export default function AuthCarousel({ initialMode }: { initialMode: AuthMode })
       const result = mode === "login"
         ? await authClient.signIn.email({ email, password, rememberMe: Boolean(form.get("remember")), callbackURL: "/my-sheets" })
         : await authClient.signUp.email({ email, password, name: String(form.get("name")).trim(), callbackURL: "/my-sheets" });
-      if (result.error) throw new Error(result.error.message || "เข้าสู่ระบบไม่สำเร็จ");
+      if (result.error) {
+        throw new Error((result.error.code && AUTH_ERRORS[result.error.code]) || result.error.message || "เข้าสู่ระบบไม่สำเร็จ");
+      }
       router.push("/my-sheets");
       router.refresh();
     } catch (cause) {
@@ -58,18 +69,18 @@ export default function AuthCarousel({ initialMode }: { initialMode: AuthMode })
         <AuthIllustration mode={mode} key={mode} />
         <div className="auth-form-window">
           {mode === "login" ? (
-            <form className="auth-card" key="login" onSubmit={submitAuth}>
+            // method="post": if JS has not loaded yet, the browser must never put the password in the URL.
+            <form className="auth-card" key="login" method="post" onSubmit={submitAuth}>
               <h1>เข้าสู่ระบบ</h1>
               <label className="field"><Icon name="mail" size={15} /><input name="email" type="email" autoComplete="email" placeholder="อีเมลของคุณ" required /></label>
               <label className="field"><Icon name="lock" size={15} /><input name="password" type="password" autoComplete="current-password" placeholder="รหัสผ่าน" required /></label>
               <div className="auth-options"><label className="check-label"><input name="remember" type="checkbox" /> จดจำการเข้าสู่ระบบ</label><span className="text-link" title="ระบบยังไม่ได้ตั้งค่าอีเมลสำหรับรีเซ็ตรหัสผ่าน">ลืมรหัสผ่าน?</span></div>
               {error && <p className="auth-error" role="alert">{error}</p>}
               <button className="primary-button" type="submit" disabled={busy}>{busy ? "กำลังดำเนินการ..." : "เข้าสู่ระบบ"} <Icon name="arrow-right" size={16} /></button>
-              <p className="auth-note">หรือ</p>
               <p className="auth-bottom">ยังไม่มีบัญชี? <a className="text-link" href="/register" onClick={(event) => { event.preventDefault(); switchMode("register"); }}>สมัครสมาชิก</a></p>
             </form>
           ) : (
-            <form className="auth-card" key="register" onSubmit={submitAuth}>
+            <form className="auth-card" key="register" method="post" onSubmit={submitAuth}>
               <h1>สมัครสมาชิก</h1>
               <label className="field"><Icon name="user" size={15} /><input name="name" type="text" autoComplete="name" placeholder="ชื่อที่ใช้" required /></label>
               <label className="field"><Icon name="mail" size={15} /><input name="email" type="email" autoComplete="email" placeholder="อีเมล" required /></label>

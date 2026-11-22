@@ -1,6 +1,6 @@
-import Navbar from "@/components/layout/Navbar";
-import Footer from "@/components/layout/Footer";
+import { redirect } from "next/navigation";
 
+// The old starter dashboard is replaced by My Sheets (which sends guests to /login itself).
 export default function DashboardPage() {
-  return <main className="site-frame"><Navbar /><section className="page-surface" /><Footer /></main>;
+  redirect("/my-sheets");
 }

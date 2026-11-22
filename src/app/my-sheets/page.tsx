@@ -6,27 +6,15 @@ import { useRouter } from "next/navigation";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import Icon from "@/components/ui/Icon";
+import { api, errorText, fileLabel, sizeLabel, STATUS_LABEL, type Sheet } from "@/lib/api-client";
 
-type Sheet = {
-  id: string;
-  title: string;
-  category: string;
-  fileSize: number | null;
-  fileName: string | null;
-  isPublished: boolean;
-  visibility: string;
-  createdAt: string;
-};
-const sizeLabel = (size: number | null) =>
-  size == null
-    ? "—"
-    : size >= 1024 * 1024
-      ? `${(size / (1024 * 1024)).toFixed(1)} MB`
-      : `${Math.max(1, Math.round(size / 1024))} KB`;
+const ALL = "ทั้งหมด";
 
+// My Sheets → GET /api/v1/users/me/sheets, DELETE /api/v1/sheets/:id
 export default function MySheetsPage() {
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState("ทั้งหมด");
+  const [subject, setSubject] = useState(ALL);
+  const [status, setStatus] = useState(ALL);
   const [sort, setSort] = useState("newest");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [sheets, setSheets] = useState<Sheet[]>([]);
@@ -38,24 +26,26 @@ export default function MySheetsPage() {
 
   useEffect(() => {
     setQuery(new URLSearchParams(window.location.search).get("search") ?? "");
-    fetch("/api/sheets")
-      .then(async (response) => {
-        if (response.status === 401) {
-          router.replace("/login");
-          return;
+    // The API returns at most 50 per page: keep asking until we have every page.
+    (async () => {
+      const all: Sheet[] = [];
+      for (let page = 1; ; page++) {
+        const result = await api<Sheet[]>(`/api/v1/users/me/sheets?pageSize=50&page=${page}`);
+        if (!result.ok) {
+          if (result.status === 401) router.replace("/login");
+          else setMessage(errorText(result.error));
+          break;
         }
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error ?? "โหลดชีตไม่สำเร็จ");
-        setSheets(payload.sheets as Sheet[]);
-      })
-      .catch((error: unknown) =>
-        setMessage(error instanceof Error ? error.message : "โหลดชีตไม่สำเร็จ"),
-      )
-      .finally(() => setLoading(false));
+        all.push(...result.data);
+        if (!result.pagination || page >= result.pagination.totalPages) break;
+      }
+      setSheets(all);
+      setLoading(false);
+    })();
   }, [router]);
 
-  const categories = useMemo(
-    () => ["ทั้งหมด", ...new Set(sheets.map((sheet) => sheet.category))],
+  const subjects = useMemo(
+    () => [ALL, ...new Set(sheets.map((sheet) => sheet.subject?.name ?? "ไม่ระบุวิชา"))],
     [sheets],
   );
   const visibleSheets = useMemo(
@@ -64,34 +54,29 @@ export default function MySheetsPage() {
         .filter(
           (sheet) =>
             sheet.title.toLowerCase().includes(query.toLowerCase()) &&
-            (category === "ทั้งหมด" || sheet.category === category),
+            (subject === ALL || (sheet.subject?.name ?? "ไม่ระบุวิชา") === subject) &&
+            (status === ALL || sheet.status === status),
         )
         .sort((a, b) =>
           sort === "name"
             ? a.title.localeCompare(b.title, "th")
             : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
         ),
-    [sheets, query, category, sort],
+    [sheets, query, subject, status, sort],
   );
 
   const deleteSheet = async () => {
     if (!pendingDelete) return;
     setBusy(true);
-    try {
-      const response = await fetch(`/api/sheets/${pendingDelete.id}`, {
-        method: "DELETE",
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "ลบชีตไม่สำเร็จ");
-      setSheets((current) =>
-        current.filter((item) => item.id !== pendingDelete.id),
-      );
+    const result = await api<{ id: string }>(`/api/v1/sheets/${pendingDelete.id}`, { method: "DELETE" });
+    setBusy(false);
+    if (result.ok) {
+      setSheets((current) => current.filter((item) => item.id !== pendingDelete.id));
       setPendingDelete(null);
       setMessage("ลบชีตเรียบร้อยแล้ว");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "ลบชีตไม่สำเร็จ");
-    } finally {
-      setBusy(false);
+    } else {
+      setPendingDelete(null);
+      setMessage(errorText(result.error));
     }
   };
 
@@ -127,20 +112,18 @@ export default function MySheetsPage() {
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
-          <select
-            aria-label="หมวดหมู่"
-            value={category}
-            onChange={(event) => setCategory(event.target.value)}
-          >
-            {categories.map((item) => (
+          <select aria-label="วิชา" value={subject} onChange={(event) => setSubject(event.target.value)}>
+            {subjects.map((item) => (
               <option key={item}>{item}</option>
             ))}
           </select>
-          <select
-            aria-label="เรียงลำดับ"
-            value={sort}
-            onChange={(event) => setSort(event.target.value)}
-          >
+          <select aria-label="สถานะ" value={status} onChange={(event) => setStatus(event.target.value)}>
+            <option value={ALL}>ทุกสถานะ</option>
+            <option value="published">เผยแพร่</option>
+            <option value="draft">ร่าง</option>
+            <option value="hidden">ซ่อน</option>
+          </select>
+          <select aria-label="เรียงลำดับ" value={sort} onChange={(event) => setSort(event.target.value)}>
             <option value="newest">ใหม่ล่าสุด</option>
             <option value="name">ชื่อ A-Z</option>
           </select>
@@ -167,62 +150,45 @@ export default function MySheetsPage() {
           <div className="empty-state">กำลังโหลดชีต...</div>
         ) : visibleSheets.length ? (
           <div className={`sheet-grid ${view === "list" ? "sheet-list" : ""}`}>
-            {visibleSheets.map((sheet) => (
-              <article className="sheet-card" key={sheet.id}>
-                <a
-                  className="pdf-preview"
-                  href={`/api/sheets/${sheet.id}/file`}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={`เปิดไฟล์ ${sheet.title}`}
-                >
-                  <div className="pdf-icon">
-                    <span>
-                      {sheet.fileName?.toLowerCase().endsWith(".pdf")
-                        ? "PDF"
-                        : "FILE"}
-                    </span>
+            {visibleSheets.map((sheet) => {
+              const openUrl = sheet.previewUrl ?? sheet.downloadUrl;
+              const cover = (
+                <div className="pdf-icon">
+                  <span>{sheet.file ? fileLabel(sheet.file.mimeType) : "ร่าง"}</span>
+                </div>
+              );
+              return (
+                <article className="sheet-card" key={sheet.id}>
+                  {openUrl ? (
+                    <a className="pdf-preview" href={openUrl} target="_blank" rel="noreferrer" aria-label={`เปิดไฟล์ ${sheet.title}`}>
+                      {cover}
+                    </a>
+                  ) : (
+                    <div className="pdf-preview" aria-label="ยังไม่มีไฟล์">{cover}</div>
+                  )}
+                  <h3>{sheet.title}</h3>
+                  <div className="sheet-meta">
+                    {sheet.subject?.name ?? "ไม่ระบุวิชา"} · {sizeLabel(sheet.file?.sizeBytes)} · ดู {sheet.viewCount}
                   </div>
-                </a>
-                <h3>{sheet.title}</h3>
-                <div className="sheet-meta">
-                  {sheet.category} · {sizeLabel(sheet.fileSize)}
-                </div>
-                <span className="published">
-                  {sheet.visibility === "public"
-                    ? "สาธารณะ"
-                    : sheet.visibility === "members"
-                      ? "เฉพาะสมาชิก"
-                      : "ส่วนตัว"}
-                </span>
-                <div className="card-actions">
-                  <Link href={`/my-sheets/${sheet.id}/edit`}>
-                    <Icon name="edit" size={14} /> แก้ไข
-                  </Link>
-                  <button
-                    className="delete"
-                    type="button"
-                    onClick={() => setPendingDelete(sheet)}
-                  >
-                    <Icon name="trash" size={14} /> ลบ
-                  </button>
-                </div>
-              </article>
-            ))}
+                  <span className="published">{STATUS_LABEL[sheet.status]}</span>
+                  <div className="card-actions">
+                    <Link href={`/my-sheets/${sheet.id}/edit`}>
+                      <Icon name="edit" size={14} /> แก้ไข
+                    </Link>
+                    <button className="delete" type="button" onClick={() => setPendingDelete(sheet)}>
+                      <Icon name="trash" size={14} /> ลบ
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         ) : (
-          <div className="empty-state">
-            {sheets.length
-              ? "ไม่พบชีตที่ตรงกับการค้นหา"
-              : "ยังไม่มีชีตที่อัปโหลดไว้"}
-          </div>
+          <div className="empty-state">{sheets.length ? "ไม่พบชีตที่ตรงกับการค้นหา" : "ยังไม่มีชีตที่อัปโหลดไว้"}</div>
         )}
       </section>
       {pendingDelete && (
-        <div
-          className="confirm-backdrop"
-          onMouseDown={() => !busy && setPendingDelete(null)}
-        >
+        <div className="confirm-backdrop" onMouseDown={() => !busy && setPendingDelete(null)}>
           <section
             className="confirm-dialog"
             role="alertdialog"
@@ -235,24 +201,14 @@ export default function MySheetsPage() {
             </div>
             <h2 id="delete-title">ยืนยันการลบชีต?</h2>
             <p>
-              คุณต้องการลบ “{pendingDelete.title}” ใช่ไหม
-              การลบนี้ไม่สามารถย้อนกลับได้
+              คุณต้องการลบ “{pendingDelete.title}” ใช่ไหม ชีตจะหายจากทุกหน้า
+              (ถ้าต้องการซ่อนชั่วคราว ให้ใช้ “แก้ไข” แล้วเลือก “ซ่อน”)
             </p>
             <div className="confirm-actions">
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={busy}
-                onClick={() => setPendingDelete(null)}
-              >
+              <button className="secondary-button" type="button" disabled={busy} onClick={() => setPendingDelete(null)}>
                 ยกเลิก
               </button>
-              <button
-                className="confirm-delete"
-                type="button"
-                disabled={busy}
-                onClick={deleteSheet}
-              >
+              <button className="confirm-delete" type="button" disabled={busy} onClick={deleteSheet}>
                 <Icon name="trash" size={15} /> {busy ? "กำลังลบ..." : "ลบชีต"}
               </button>
             </div>
