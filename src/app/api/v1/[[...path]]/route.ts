@@ -1,5 +1,6 @@
 import { getSessionUser, isUuid } from "@/lib/api";
 import { getInteractionSql } from "@/lib/interaction-db";
+import { getSheetDtos } from "@/lib/sheets";
 
 type Context = { params: Promise<{ path?: string[] }> };
 type Viewer = { id: string } | null;
@@ -111,8 +112,13 @@ async function dispatch(request: Request, context: Context) {
     if (!user) return bad("Authentication required.", 401);
     if (path.length === 2 && !isUuid(path[1])) return bad("Sheet not found.", 404);
     if (path.length === 1 && method === "GET") {
-      const rows = await db`select s.id, s.title, s.description, s.owner_id as "ownerId", f.created_at as "favoritedAt" from favorites f join sheets s on s.id = f.sheet_id where f.user_id = ${user.id} and s.deleted_at is null and (s.status = 'published' or s.owner_id = ${user.id}) order by f.created_at desc`;
-      return ok(rows);
+      const rows = await db`select s.id, s.owner_id as "ownerId", f.created_at as "favoritedAt" from favorites f join sheets s on s.id = f.sheet_id where f.user_id = ${user.id} and s.deleted_at is null and (s.status = 'published' or s.owner_id = ${user.id}) order by f.created_at desc`;
+      // Same sheet shape as GET /sheets (owner, subject, category, file, counts, previewUrl…) + favoritedAt.
+      const sheets = await getSheetDtos(rows.map((r) => String(r.id)));
+      return ok(rows.flatMap((r) => {
+        const sheet = sheets.get(String(r.id));
+        return sheet ? [{ ...sheet, ownerId: r.ownerId, favoritedAt: r.favoritedAt }] : [];
+      }));
     }
     if (path.length === 2 && method === "POST") {
       if (!(await sheetVisible(path[1], user.id))) return bad("Sheet not found.", 404);

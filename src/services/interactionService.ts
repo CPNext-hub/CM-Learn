@@ -1,6 +1,6 @@
 // Adapter for BE02's Interaction API (src/app/api/v1/[[...path]]/route.ts):
 // comments + replies, like/dislike and favorites. Pages get Thai errors and FE01-friendly shapes.
-import { api, jsonInit, type ApiErrorBody } from "@/lib/api-client";
+import { api, jsonInit, type ApiErrorBody, type Sheet as ApiSheet } from "@/lib/api-client";
 import type { Reaction, ReactionState, SheetComment } from "@/types/interaction";
 
 // BE02 answers in English; show Thai to users (unknown messages fall back by status code).
@@ -97,14 +97,22 @@ export async function toggleReaction(sheetId: string, clicked: Reaction, current
   return { likes: data.likes, dislikes: data.dislikes, mine: clicked };
 }
 
-/** IDs of the signed-in user's saved sheets (GET /favorites). Guests have none. */
-export async function getFavoriteIds(): Promise<Set<string>> {
-  const result = await api<{ id: string }[]>("/api/v1/favorites");
+/** A saved sheet: the same shape as GET /api/v1/sheets items, plus when it was saved. */
+export type SavedSheet = ApiSheet & { favoritedAt: string };
+
+/** GET /favorites, newest save first. Returns null for guests (401). */
+export async function getSavedSheets(): Promise<SavedSheet[] | null> {
+  const result = await api<SavedSheet[]>("/api/v1/favorites");
   if (!result.ok) {
-    if (result.status === 401) return new Set();
+    if (result.status === 401) return null;
     throw new Error(thaiError(result.status, result.error));
   }
-  return new Set(result.data.map((s) => s.id));
+  return result.data;
+}
+
+/** IDs of the signed-in user's saved sheets. Guests have none. */
+export async function getFavoriteIds(): Promise<Set<string>> {
+  return new Set((await getSavedSheets())?.map((s) => s.id) ?? []);
 }
 
 export async function setFavorite(sheetId: string, saved: boolean) {

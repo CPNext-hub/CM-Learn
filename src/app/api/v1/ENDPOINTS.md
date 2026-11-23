@@ -1,8 +1,10 @@
 # Interaction API
 
-These Next.js Route Handlers expose the BE 02 endpoints under `/api/v1`. The
-existing app uses `subject` as its sheet record, so `{id}` and `:sheetId` refer
-to `sheets.id`. Mutating endpoints require the existing Better Auth session.
+These Next.js Route Handlers expose the BE 02 endpoints under `/api/v1`.
+`{id}` and `:sheetId` refer to `sheets.id`. Mutating endpoints require the Better Auth session.
+
+> Full, up-to-date documentation (Thai, with response shapes) is in `docs/API.md`.
+> `GET /favorites` now returns full sheet objects (same shape as `GET /sheets`) plus `favoritedAt`.
 
 | Method | Endpoint | Body |
 | --- | --- | --- |

@@ -369,6 +369,14 @@ async function main() {
   check("adding the same favorite twice keeps one row", r.status === 201 && favoriteRows.count === 1);
   r = await alice.req("/api/v1/favorites");
   check("favorite list returns the selected sheet", r.status === 200 && r.json?.data?.some((item) => item.id === commentSheet.id));
+  {
+    const item = r.json?.data?.find((i) => i.id === commentSheet.id);
+    check(
+      "favorite list items use the full sheet shape (+ favoritedAt)",
+      !!item && typeof item.owner?.name === "string" && "subject" in item && "downloadUrl" in item && typeof item.likeCount === "number" && !!item.favoritedAt && !("storageKey" in item),
+      JSON.stringify(Object.keys(item ?? {})),
+    );
+  }
   r = await bob.req("/api/v1/favorites/" + commentSheet.id, { method: "DELETE" });
   const [stillFavorited] = await sql.unsafe("select count(*)::int as count from favorites where user_id = $1 and sheet_id = $2", [favoriteOwner.id, commentSheet.id]);
   check("a user can only remove their own favorite", r.status === 200 && stillFavorited.count === 1);

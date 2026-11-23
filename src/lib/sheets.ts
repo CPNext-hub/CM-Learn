@@ -100,6 +100,19 @@ export async function listSheets({ where, sort, limit, offset }: ListOptions) {
 }
 
 /**
+ * Full sheet DTOs for a set of ids (no access check: the caller has already filtered the ids).
+ * Used by other features that store sheet ids, e.g. BE02 favorites.
+ */
+export async function getSheetDtos(ids: string[]): Promise<Map<string, SheetDto>> {
+  const map = new Map<string, SheetDto>();
+  if (ids.length === 0) return map;
+  const rows = await baseSelect().where(inArray(sheets.id, ids));
+  const files = await latestFiles(rows.map((r) => r.sheet.id));
+  for (const r of rows) map.set(r.sheet.id, toSheetDto(r, files.get(r.sheet.id)));
+  return map;
+}
+
+/**
  * Search over title + description.
  * - Full-text search uses the SAME expression as the GIN index `sheets_search_idx`.
  * - ILIKE is a fallback for Thai: Postgres cannot split Thai words, so "สรุปเคมี" would not match "เคมี" via FTS.
