@@ -317,7 +317,7 @@ export const collections = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
-    unique("collections_owner_name_uq").on(t.ownerId, t.name),
+    uniqueIndex("collections_owner_name_uq").on(t.ownerId, t.name),
     check("collections_name_not_blank", sql.raw("btrim(\"collections\".\"name\") <> ''")),
   ],
 );
@@ -327,7 +327,7 @@ export const collectionItems = pgTable(
   {
     collectionId: uuid("collection_id").notNull().references(() => collections.id, { onDelete: "cascade" }),
     sheetId: uuid("sheet_id").notNull().references(() => sheets.id, { onDelete: "cascade" }),
-    addedAt: createdAt(),
+    addedAt: tz("added_at").notNull().defaultNow(),
   },
   (t) => [primaryKey({ name: "collection_items_pk", columns: [t.collectionId, t.sheetId] })],
 );
@@ -345,7 +345,7 @@ export const reports = pgTable(
     resolvedAt: tz("resolved_at"),
   },
   (t) => [
-    unique("reports_reporter_sheet_uq").on(t.reporterId, t.sheetId),
+    uniqueIndex("reports_reporter_sheet_uq").on(t.reporterId, t.sheetId),
     check("reports_reason_valid", sql.raw("\"reports\".\"reason\" in ('spam', 'copyright', 'inappropriate', 'other')")),
     check("reports_status_valid", sql.raw("\"reports\".\"status\" in ('open', 'reviewing', 'resolved', 'rejected')")),
   ],
