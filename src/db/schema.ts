@@ -294,3 +294,59 @@ export type SheetFile = typeof sheetFiles.$inferSelect;
 export type NewSheetFile = typeof sheetFiles.$inferInsert;
 export type Comment = typeof comments.$inferSelect;
 export type SheetReaction = typeof sheetReactions.$inferSelect;
+
+export const favorites = pgTable(
+  "favorites",
+  {
+    userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    sheetId: uuid("sheet_id").notNull().references(() => sheets.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ name: "favorites_pk", columns: [t.userId, t.sheetId] })],
+);
+
+export const collections = pgTable(
+  "collections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    isPublic: boolean("is_public").notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("collections_owner_name_uq").on(t.ownerId, t.name),
+    check("collections_name_not_blank", sql.raw("btrim(\"collections\".\"name\") <> ''")),
+  ],
+);
+
+export const collectionItems = pgTable(
+  "collection_items",
+  {
+    collectionId: uuid("collection_id").notNull().references(() => collections.id, { onDelete: "cascade" }),
+    sheetId: uuid("sheet_id").notNull().references(() => sheets.id, { onDelete: "cascade" }),
+    addedAt: tz("added_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ name: "collection_items_pk", columns: [t.collectionId, t.sheetId] })],
+);
+
+export const reports = pgTable(
+  "reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    reporterId: text("reporter_id").notNull().references(() => user.id, { onDelete: "restrict" }),
+    sheetId: uuid("sheet_id").notNull().references(() => sheets.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    details: text("details"),
+    status: text("status").notNull().default("open"),
+    createdAt: createdAt(),
+    resolvedAt: tz("resolved_at"),
+  },
+  (t) => [
+    uniqueIndex("reports_reporter_sheet_uq").on(t.reporterId, t.sheetId),
+    check("reports_reason_valid", sql.raw("\"reports\".\"reason\" in ('spam', 'copyright', 'inappropriate', 'other')")),
+    check("reports_status_valid", sql.raw("\"reports\".\"status\" in ('open', 'reviewing', 'resolved', 'rejected')")),
+  ],
+);

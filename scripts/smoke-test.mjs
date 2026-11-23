@@ -6,7 +6,7 @@
 //
 // It creates its own users/sheets (alice-<run>@smoke.test, bob-<run>@smoke.test) and deletes ONLY those
 // at the end, so it is safe to run while other people use the same database.
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
@@ -39,6 +39,15 @@ function check(name, condition, detail = "") {
     failures.push(`[${section}] ${name} ${detail}`);
     console.log(`  ✗ ${name} ${detail}`);
   }
+}
+function hasApiEnvelope(response, kind) {
+  const body = response?.json;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  if (kind === "success") return Object.keys(body).length === 1 && Object.hasOwn(body, "data");
+  const error = body.error;
+  return Object.keys(body).length === 1 && !!error && typeof error === "object" &&
+    typeof error.code === "string" && typeof error.message === "string" &&
+    Object.keys(error).every((key) => ["code", "message", "details"].includes(key));
 }
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
@@ -277,6 +286,187 @@ async function main() {
     );
   }
 
+  // ----------------------------------------------------------------- Comment / Reply / Reaction + database relationships
+  group("Comments / Replies / Reactions");
+  const commentSheet = created.pdf;
+  const secondSheet = created.png;
+  if (!commentSheet?.id || !secondSheet?.id) {
+    check("interaction prerequisites: uploaded sheets", false);
+  } else {
+    r = await guest.req("/api/v1/sheets/" + commentSheet.id + "/comments");
+    check("guest reads comments on a published sheet", r.status === 200 && Array.isArray(r.json?.data));
+    r = await guest.req("/api/v1/sheets/" + commentSheet.id + "/comments", { method: "POST", json: { body: "guest comment" } });
+    check("guest cannot post a comment", r.status === 401);
+
+    r = await alice.req("/api/v1/sheets/" + commentSheet.id + "/comments", { method: "POST", json: { body: "root comment " + RUN } });
+    const rootComment = r.json?.data;
+    check("signed-in user creates a top-level comment", r.status === 201 && !!rootComment?.id);
+    r = await bob.req("/api/v1/comments/" + rootComment?.id + "/replies", { method: "POST", json: { body: "reply " + RUN } });
+    const replyComment = r.json?.data;
+    check("another user replies to the root comment", r.status === 201 && replyComment?.parentCommentId === rootComment?.id);
+    r = await alice.req("/api/v1/comments/" + replyComment?.id + "/replies", { method: "POST", json: { body: "nested reply" } });
+    check("reply-to-reply is rejected (one reply level)", r.status === 404);
+
+    r = await guest.req("/api/v1/sheets/" + commentSheet.id + "/comments");
+    const visibleRoot = r.json?.data?.find((comment) => comment.id === rootComment?.id);
+    check("comment list nests replies under the correct parent", !!visibleRoot && visibleRoot.replies?.length === 1 && visibleRoot.replies[0].id === replyComment?.id);
+    r = await bob.req("/api/v1/comments/" + rootComment?.id, { method: "DELETE" });
+    check("a different user cannot delete the comment", r.status === 404);
+    r = await alice.req("/api/v1/comments/" + rootComment?.id, { method: "DELETE" });
+    check("author soft-deletes their comment", r.status === 200 && r.json?.data?.deleted === true);
+    r = await guest.req("/api/v1/sheets/" + commentSheet.id + "/comments");
+    const deletedRoot = r.json?.data?.find((comment) => comment.id === rootComment?.id);
+    check("deleted parent remains as a placeholder so replies retain context", deletedRoot?.deleted === true && deletedRoot.body === "" && deletedRoot.replies?.length === 1);
+
+    const [aliceRow] = await sql.unsafe('select id from "user" where email = $1', [emailA]);
+    let crossSheetFkCode = null;
+    try {
+      await sql.unsafe(
+        "insert into comments (id, sheet_id, author_id, parent_comment_id, body) values ($1, $2, $3, $4, $5)",
+        [randomUUID(), secondSheet.id, aliceRow.id, rootComment.id, "cross-sheet reply"],
+      );
+    } catch (error) {
+      crossSheetFkCode = error.code;
+    }
+    check("database FK rejects a reply whose parent belongs to another sheet", crossSheetFkCode === "23503");
+
+    r = await guest.req("/api/v1/sheets/" + commentSheet.id + "/reactions", { method: "POST", json: { reaction: "like" } });
+    check("guest cannot react", r.status === 401);
+    r = await alice.req("/api/v1/sheets/" + commentSheet.id + "/reactions", { method: "POST", json: { reaction: "like" } });
+    check("signed-in user likes a sheet", r.status === 200 && r.json?.data?.reaction === "like");
+    r = await alice.req("/api/v1/sheets/" + commentSheet.id + "/reactions", { method: "POST", json: { reaction: "like" } });
+    const [likeRows] = await sql.unsafe("select count(*)::int as count from sheet_reactions where user_id = $1 and sheet_id = $2", [aliceRow.id, commentSheet.id]);
+    check("repeating Like does not create a duplicate row", r.status === 200 && likeRows.count === 1);
+    r = await alice.req("/api/v1/sheets/" + commentSheet.id + "/reactions", { method: "POST", json: { reaction: "dislike" } });
+    const [changedReaction] = await sql.unsafe("select count(*)::int as count, max(reaction) as reaction from sheet_reactions where user_id = $1 and sheet_id = $2", [aliceRow.id, commentSheet.id]);
+    check("Like changes to Dislike on the same row", r.status === 200 && r.json?.data?.reaction === "dislike" && changedReaction.count === 1 && changedReaction.reaction === "dislike");
+    r = await alice.req("/api/v1/sheets/" + commentSheet.id + "/reactions", { method: "DELETE" });
+    const [remainingReactions] = await sql.unsafe("select count(*)::int as count from sheet_reactions where user_id = $1 and sheet_id = $2", [aliceRow.id, commentSheet.id]);
+    check("user can remove their reaction", r.status === 200 && remainingReactions.count === 0);
+    r = await alice.req("/api/v1/sheets/" + commentSheet.id + "/reactions", { method: "POST", json: { reaction: "clap" } });
+    check("invalid reaction values are rejected", r.status === 400);
+    let duplicateReactionCode = null;
+    await sql.unsafe("insert into sheet_reactions (user_id, sheet_id, reaction) values ($1, $2, $3)", [aliceRow.id, commentSheet.id, "like"]);
+    try {
+      await sql.unsafe("insert into sheet_reactions (user_id, sheet_id, reaction) values ($1, $2, $3)", [aliceRow.id, commentSheet.id, "dislike"]);
+    } catch (error) {
+      duplicateReactionCode = error.code;
+    }
+    await sql.unsafe("delete from sheet_reactions where user_id = $1 and sheet_id = $2", [aliceRow.id, commentSheet.id]);
+    check("database primary key rejects a second reaction row for the same user and sheet", duplicateReactionCode === "23505");
+  }
+  // ----------------------------------------------------------------- Favorites / Collections / Reports — success + error cases
+  group("Favorites / Collections / Reports");
+  const [favoriteOwner] = await sql.unsafe('select id from "user" where email = $1', [emailA]);
+  r = await guest.req("/api/v1/favorites");
+  check("guest cannot list favorites", r.status === 401);
+  r = await guest.req("/api/v1/favorites/" + commentSheet.id, { method: "POST" });
+  check("guest cannot add a favorite", r.status === 401);
+  r = await alice.req("/api/v1/favorites/" + commentSheet.id, { method: "POST" });
+  check("signed-in user adds a favorite", r.status === 201 && r.json?.data?.favorited === true);
+  r = await alice.req("/api/v1/favorites/" + commentSheet.id, { method: "POST" });
+  const [favoriteRows] = await sql.unsafe("select count(*)::int as count from favorites where user_id = $1 and sheet_id = $2", [favoriteOwner.id, commentSheet.id]);
+  check("adding the same favorite twice keeps one row", r.status === 201 && favoriteRows.count === 1);
+  r = await alice.req("/api/v1/favorites");
+  check("favorite list returns the selected sheet", r.status === 200 && r.json?.data?.some((item) => item.id === commentSheet.id));
+  r = await bob.req("/api/v1/favorites/" + commentSheet.id, { method: "DELETE" });
+  const [stillFavorited] = await sql.unsafe("select count(*)::int as count from favorites where user_id = $1 and sheet_id = $2", [favoriteOwner.id, commentSheet.id]);
+  check("a user can only remove their own favorite", r.status === 200 && stillFavorited.count === 1);
+  r = await alice.req("/api/v1/favorites/" + commentSheet.id, { method: "DELETE" });
+  check("user removes a favorite", r.status === 200 && r.json?.data?.favorited === false);
+  check("invalid favorite sheet id returns 404", (await alice.req("/api/v1/favorites/not-a-uuid", { method: "POST" })).status === 404);
+  check("unknown favorite sheet returns 404", (await alice.req("/api/v1/favorites/00000000-0000-0000-0000-000000000000", { method: "POST" })).status === 404);
+
+  r = await guest.req("/api/v1/collections");
+  check("guest cannot list collections", r.status === 401);
+  r = await alice.req("/api/v1/collections", { method: "POST", json: { name: "   " } });
+  check("blank collection name is rejected", r.status === 400);
+  r = await alice.req("/api/v1/collections", { method: "POST", json: { name: `Smoke ${RUN}`, description: "BE02 smoke test", isPublic: false } });
+  const collection = r.json?.data;
+  check("signed-in user creates a collection", r.status === 201 && !!collection?.id);
+  r = await alice.req("/api/v1/collections", { method: "POST", json: { name: `Smoke ${RUN}` } });
+  check("duplicate collection name is rejected", r.status === 409);
+  r = await alice.req("/api/v1/collections");
+  check("collection list includes the new collection", r.status === 200 && r.json?.data?.some((item) => item.id === collection?.id));
+  r = await alice.req(`/api/v1/collections/${collection?.id}/sheets`, { method: "POST", json: { sheetId: commentSheet.id } });
+  check("owner adds a sheet to collection", r.status === 201);
+  r = await alice.req(`/api/v1/collections/${collection?.id}/sheets`, { method: "POST", json: { sheetId: commentSheet.id } });
+  const [collectionRows] = await sql.unsafe("select count(*)::int as count from collection_items where collection_id = $1 and sheet_id = $2", [collection.id, commentSheet.id]);
+  check("adding the same sheet twice keeps one collection item", r.status === 201 && collectionRows.count === 1);
+  r = await alice.req(`/api/v1/collections/${collection.id}/sheets`);
+  check("collection sheet list returns the added sheet", r.status === 200 && r.json?.data?.some((item) => item.id === commentSheet.id));
+  r = await bob.req(`/api/v1/collections/${collection.id}/sheets`, { method: "POST", json: { sheetId: secondSheet.id } });
+  check("another user cannot add to a private collection", r.status === 404);
+  r = await bob.req(`/api/v1/collections/${collection.id}/sheets/${commentSheet.id}`, { method: "DELETE" });
+  check("another user cannot remove from a collection", r.status === 404);
+  r = await alice.req(`/api/v1/collections/${collection.id}/sheets/${commentSheet.id}`, { method: "DELETE" });
+  check("owner removes a sheet from collection", r.status === 200 && r.json?.data?.removed === true);
+  r = await alice.req(`/api/v1/collections/${collection.id}/sheets/${commentSheet.id}`, { method: "DELETE" });
+  check("removing a missing collection item returns 404", r.status === 404);
+  check("invalid collection id returns 404", (await alice.req("/api/v1/collections/not-a-uuid/sheets")).status === 404);
+  check("invalid collection sheet id returns 404", (await alice.req(`/api/v1/collections/${collection.id}/sheets/not-a-uuid`, { method: "DELETE" })).status === 404);
+
+  r = await guest.req(`/api/v1/sheets/${secondSheet.id}/reports`, { method: "POST", json: { reason: "spam" } });
+  check("guest cannot report a sheet", r.status === 401);
+  r = await bob.req(`/api/v1/sheets/${secondSheet.id}/reports`, { method: "POST", json: { reason: "spam", details: `Smoke ${RUN}` } });
+  const report = r.json?.data;
+  check("signed-in user reports a sheet", r.status === 201 && report?.reason === "spam" && report?.status === "open");
+  r = await bob.req(`/api/v1/sheets/${secondSheet.id}/reports`, { method: "POST", json: { reason: "spam" } });
+  check("duplicate report by same user is rejected", r.status === 409);
+  r = await alice.req(`/api/v1/sheets/${commentSheet.id}/reports`, { method: "POST", json: { reason: "not-a-reason" } });
+  check("invalid report reason is rejected", r.status === 400);
+  r = await alice.req(`/api/v1/sheets/${commentSheet.id}/reports`, { method: "POST", json: { reason: "other", details: "x".repeat(2001) } });
+  check("overlong report details are rejected", r.status === 400);
+  r = await alice.req("/api/v1/sheets/not-a-uuid/reports", { method: "POST", json: { reason: "spam" } });
+  check("invalid report sheet id returns 404", r.status === 404);
+  // ----------------------------------------------------------------- BE02 response contract: { data } or { error: { code, message } }
+  group("BE02 Response format");
+  const responseCases = [];
+  let shapeResponse = await guest.req(`/api/v1/sheets/${commentSheet.id}/comments`);
+  responseCases.push(["GET comments success", shapeResponse, "success"]);
+  shapeResponse = await guest.req(`/api/v1/sheets/${commentSheet.id}/comments`, { method: "POST", json: { body: "guest" } });
+  responseCases.push(["POST comments unauthorized", shapeResponse, "error"]);
+  shapeResponse = await alice.req(`/api/v1/sheets/${commentSheet.id}/comments`, { method: "POST", json: { body: `Shape comment ${RUN}` } });
+  const shapeComment = shapeResponse.json?.data;
+  responseCases.push(["POST comments success", shapeResponse, "success"]);
+  shapeResponse = await bob.req(`/api/v1/comments/${shapeComment?.id}/replies`, { method: "POST", json: { body: `Shape reply ${RUN}` } });
+  responseCases.push(["POST reply success", shapeResponse, "success"]);
+  shapeResponse = await alice.req(`/api/v1/comments/${shapeComment?.id}`, { method: "DELETE" });
+  responseCases.push(["DELETE comment success", shapeResponse, "success"]);
+  shapeResponse = await alice.req(`/api/v1/sheets/${commentSheet.id}/reactions`, { method: "POST", json: { reaction: "like" } });
+  responseCases.push(["POST reaction success", shapeResponse, "success"]);
+  shapeResponse = await alice.req(`/api/v1/sheets/${commentSheet.id}/reactions`, { method: "POST", json: { reaction: "invalid" } });
+  responseCases.push(["POST reaction validation error", shapeResponse, "error"]);
+  shapeResponse = await alice.req(`/api/v1/sheets/${commentSheet.id}/reactions`, { method: "DELETE" });
+  responseCases.push(["DELETE reaction success", shapeResponse, "success"]);
+  shapeResponse = await guest.req("/api/v1/favorites");
+  responseCases.push(["GET favorites unauthorized", shapeResponse, "error"]);
+  shapeResponse = await alice.req("/api/v1/favorites");
+  responseCases.push(["GET favorites success", shapeResponse, "success"]);
+  shapeResponse = await alice.req(`/api/v1/favorites/${commentSheet.id}`, { method: "POST" });
+  responseCases.push(["POST favorite success", shapeResponse, "success"]);
+  shapeResponse = await alice.req(`/api/v1/favorites/${commentSheet.id}`, { method: "DELETE" });
+  responseCases.push(["DELETE favorite success", shapeResponse, "success"]);
+  shapeResponse = await alice.req("/api/v1/collections", { method: "POST", json: { name: " " } });
+  responseCases.push(["POST collection validation error", shapeResponse, "error"]);
+  shapeResponse = await alice.req("/api/v1/collections", { method: "POST", json: { name: `Response ${RUN}` } });
+  const shapeCollection = shapeResponse.json?.data;
+  responseCases.push(["POST collection success", shapeResponse, "success"]);
+  shapeResponse = await alice.req(`/api/v1/collections/${shapeCollection?.id}/sheets`, { method: "POST", json: { sheetId: commentSheet.id } });
+  responseCases.push(["POST collection sheet success", shapeResponse, "success"]);
+  shapeResponse = await alice.req(`/api/v1/collections/${shapeCollection?.id}/sheets`);
+  responseCases.push(["GET collection sheets success", shapeResponse, "success"]);
+  shapeResponse = await alice.req(`/api/v1/collections/${shapeCollection?.id}/sheets/${commentSheet.id}`, { method: "DELETE" });
+  responseCases.push(["DELETE collection sheet success", shapeResponse, "success"]);
+  shapeResponse = await guest.req(`/api/v1/sheets/${commentSheet.id}/reports`, { method: "POST", json: { reason: "spam" } });
+  responseCases.push(["POST report unauthorized", shapeResponse, "error"]);
+  shapeResponse = await bob.req(`/api/v1/sheets/${commentSheet.id}/reports`, { method: "POST", json: { reason: "spam" } });
+  responseCases.push(["POST report success", shapeResponse, "success"]);
+  shapeResponse = await bob.req(`/api/v1/sheets/${commentSheet.id}/reports`, { method: "POST", json: { reason: "spam" } });
+  responseCases.push(["POST duplicate report conflict", shapeResponse, "error"]);
+  for (const [name, response, kind] of responseCases) {
+    check(`${name} matches { ${kind === "success" ? "data" : "error: { code, message }"} }`, hasApiEnvelope(response, kind));
+  }
   // file on disk matches DB
   const rows = await sql`select f.storage_key, f.size_bytes from sheet_files f join sheets s on s.id = f.sheet_id
     join "user" u on u.id = s.owner_id where u.email = ${emailA}`;
