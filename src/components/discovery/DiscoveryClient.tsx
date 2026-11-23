@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import { getDiscoverySheets } from "@/services/discoveryService";
@@ -52,20 +52,28 @@ export default function DiscoveryClient() {
         });
     }, []);
 
+    // Only the newest request may update the list: on first load an empty-keyword request and the
+    // ?q= request run together, and the slower one must not overwrite the other's results.
+    const latestRequest = useRef(0);
+
     const loadSheets = useCallback(async () => {
+        const requestId = ++latestRequest.current;
+        const isStale = () => requestId !== latestRequest.current;
         setLoading(true);
         try {
             const result = await getDiscoverySheets({ keyword, filters, sort, page, limit: 6 });
+            if (isStale()) return;
             setSheets(result.items);
             setTotal(result.total);
             setTotalPages(result.totalPages);
             setError("");
         } catch (err) {
+            if (isStale()) return;
             setSheets([]);
             setTotal(0);
             setError(err instanceof Error ? err.message : "โหลดข้อมูลไม่สำเร็จ");
         } finally {
-            setLoading(false);
+            if (!isStale()) setLoading(false);
         }
     }, [keyword, filters, sort, page]);
 
