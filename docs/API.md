@@ -1,4 +1,4 @@
-# CM Learn API (BE01) — สำหรับทีม Frontend
+# CM Learn API (BE01 + BE02) — สำหรับทีม Frontend
 
 Base URL (local): `http://localhost:3000` · ทุก endpoint อยู่ใต้ `/api/v1` ยกเว้น Auth ที่อยู่ใต้ `/api/auth`
 
@@ -161,9 +161,49 @@ const res = await fetch("/api/v1/users/me/avatar", { method: "POST", body: form 
 ### รูปโปรไฟล์ในหน้าเว็บ
 ใช้ `image` ตรง ๆ: `<img src={profile.image}>` หรือ `<img src={sheet.owner.image}>` — เป็นได้ทั้ง URL ของเรา (`/api/v1/users/<id>/avatar?v=...` เปิดดูได้ทุกคน) หรือ URL ภายนอก (เช่นรูปจาก Google) · ถ้าเป็น `null` ให้แสดงตัวอักษรย่อของชื่อแทน
 
-## ยังไม่มี (กำลังทำ)
+## Interaction (BE02) — ความคิดเห็น, Like, บันทึก, Collection, Report, Dashboard
+โค้ดอยู่ที่ `src/app/api/v1/[[...path]]/route.ts` · ตารางจาก migration `0003_interactions` · ทุกอันที่เขียนข้อมูลต้อง login (ไม่ login → 401)
+ฝั่งหน้าเว็บให้เรียกผ่าน `src/services/interactionService.ts` ซึ่ง**แปลข้อความ error ภาษาอังกฤษของ BE02 เป็นภาษาไทย**ให้แล้ว
+
+### ความคิดเห็น
+| Method | Endpoint | Body | หมายเหตุ |
+|---|---|---|---|
+| GET | `/api/v1/sheets/:id/comments` | — | ไม่ต้อง login · เรียงเก่า→ใหม่ · แต่ละอันมี `replies` ซ้อน 1 ชั้น |
+| POST | `/api/v1/sheets/:id/comments` | `{ "body": "..." }` | ≤ 5,000 ตัวอักษร → 201 |
+| POST | `/api/v1/comments/:id/replies` | `{ "body": "..." }` | ตอบได้เฉพาะความคิดเห็นหลักที่ยังไม่ถูกลบ (ตอบ reply → 404) |
+| DELETE | `/api/v1/comments/:id` | — | เจ้าของความคิดเห็นเท่านั้น · soft delete: ข้อความหาย แต่ reply ยังอยู่ |
+
+รูปแบบความคิดเห็น: `{ id, authorId, authorName, authorImage, parentCommentId, body, deleted, createdAt, updatedAt, replies: [...] }` — ถ้า `deleted = true` แล้ว `body` จะเป็น `""` (แสดงว่า "ความคิดเห็นนี้ถูกลบแล้ว")
+
+### Like / Dislike
+| Method | Endpoint | Body | ตอบกลับ |
+|---|---|---|---|
+| POST | `/api/v1/sheets/:id/reactions` | `{ "reaction": "like" \| "dislike" }` | `{ reaction, likes, dislikes, ... }` — กดอีกแบบ = เปลี่ยน (1 คน 1 reaction ต่อชีท) |
+| DELETE | `/api/v1/sheets/:id/reactions` | — | `{ removed: true }` (ไม่มีจำนวนใหม่ — คำนวณเอง หรือใช้ `toggleReaction` ใน service) |
+
+จำนวนรวมและ reaction ของตัวเองดูได้จาก `GET /api/v1/sheets/:id` → `likeCount`, `dislikeCount`, `viewer.reaction`
+
+### บันทึกชีท (Favorites)
+| Method | Endpoint | ตอบกลับ |
+|---|---|---|
+| GET | `/api/v1/favorites` | รายการชีทที่บันทึก เรียงจากบันทึกล่าสุด · **แต่ละอันเป็น Sheet object เต็มเหมือน `GET /sheets`** + `favoritedAt`, `ownerId` |
+| POST | `/api/v1/favorites/:sheetId` | 201 `{ sheetId, favorited: true }` (กดซ้ำไม่เกิดแถวซ้ำ) |
+| DELETE | `/api/v1/favorites/:sheetId` | `{ sheetId, favorited: false }` |
+
+ไม่มีจำนวนคนบันทึกต่อชีท · หน้า `/my-sheets/saved` ใช้ API นี้แล้ว (หน้าตาแบบง่าย รอ FE01 ออกแบบ)
+
+### อื่น ๆ (มี API แล้ว ยังไม่มีหน้าเว็บ)
+| Method | Endpoint | Body |
+|---|---|---|
+| GET / POST | `/api/v1/collections` | POST: `{ "name": "...", "description"?: "...", "isPublic"?: boolean }` (ชื่อซ้ำ → 409) |
+| GET / POST | `/api/v1/collections/:id/sheets` | POST: `{ "sheetId": "..." }` |
+| DELETE | `/api/v1/collections/:id/sheets/:sheetId` | — |
+| POST | `/api/v1/sheets/:id/reports` | `{ "reason": "spam" \| "copyright" \| "inappropriate" \| "other", "details"?: "..." }` (รายงานซ้ำ → 409) |
+| GET | `/api/v1/users/me/dashboard` | ตอบ `{ totalSheets, publishedSheets, totalViews, commentsReceived, favoritesReceived, likes, dislikes }` |
+
+## ยังไม่มี
 - โปรไฟล์สาธารณะของผู้ใช้อื่น `GET /api/v1/users/:id` — เลื่อนไปหลัง MVP
-- Comment / Reply / Like / Dislike — BE02
+- ถูกใจความคิดเห็น, reaction อื่นนอกจาก Like/Dislike, ติดตามผู้สร้าง, จำนวนดาวน์โหลด — ไม่อยู่ในสเปก
 
 ## ข้อจำกัดที่ FE ควรรู้
 - ไฟล์ดาวน์โหลดส่งแบบ chunked (Next.js ไม่ส่ง `Content-Length`) — แสดงขนาดไฟล์จาก `sheet.file.sizeBytes`

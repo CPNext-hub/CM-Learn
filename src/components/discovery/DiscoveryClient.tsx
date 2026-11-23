@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import { getDiscoverySheets } from "@/services/discoveryService";
 import { initials, loadLookups, type Lookup } from "@/lib/api-client";
+import { useFavorites } from "@/components/interactions/useInteractions";
 
 import type {
     DiscoverySheet,
@@ -18,9 +19,11 @@ const initialFilters: DiscoveryFilters = { subjectId: "", categoryId: "" };
 
 // Search & filter (FE01 design) — data from GET /api/v1/sheets.
 // Hidden until the backend has the data: university, faculty, exam type, "verified PDF", GoodNotes,
-// "popular ≥ 1,000 downloads" filters, rating / downloads sorting, rating & favourite on cards,
+// "popular ≥ 1,000 downloads" filters, rating / downloads sorting, rating & save count on cards,
 // satisfaction score in the hero, the "recently opened" promotion.
+// The save (♡) button on each card uses BE02 favorites.
 export default function DiscoveryClient() {
+    const favorites = useFavorites();
     const [keyword, setKeyword] = useState("");
     const [searchInput, setSearchInput] = useState("");
     const [filters, setFilters] = useState<DiscoveryFilters>(initialFilters);
@@ -49,20 +52,28 @@ export default function DiscoveryClient() {
         });
     }, []);
 
+    // Only the newest request may update the list: on first load an empty-keyword request and the
+    // ?q= request run together, and the slower one must not overwrite the other's results.
+    const latestRequest = useRef(0);
+
     const loadSheets = useCallback(async () => {
+        const requestId = ++latestRequest.current;
+        const isStale = () => requestId !== latestRequest.current;
         setLoading(true);
         try {
             const result = await getDiscoverySheets({ keyword, filters, sort, page, limit: 6 });
+            if (isStale()) return;
             setSheets(result.items);
             setTotal(result.total);
             setTotalPages(result.totalPages);
             setError("");
         } catch (err) {
+            if (isStale()) return;
             setSheets([]);
             setTotal(0);
             setError(err instanceof Error ? err.message : "โหลดข้อมูลไม่สำเร็จ");
         } finally {
-            setLoading(false);
+            if (!isStale()) setLoading(false);
         }
     }, [keyword, filters, sort, page]);
 
@@ -288,6 +299,18 @@ export default function DiscoveryClient() {
                                                 <span>เข้าชม {formatCount(sheet.views)} ครั้ง · ♥ {formatCount(sheet.likes)}</span>
                                             </div>
                                         </div>
+
+                                        {/* Save (BE02 favorites). No per-sheet save count exists, so only the state is shown. */}
+                                        <button
+                                            type="button"
+                                            className={`${styles.favoriteButton} ${favorites.isSaved(sheet.id) ? styles.favoriteActive : ""}`}
+                                            onClick={() => favorites.toggle(sheet.id)}
+                                            disabled={favorites.busyId === sheet.id}
+                                            aria-label={favorites.isSaved(sheet.id) ? "เลิกบันทึกชีท" : "บันทึกชีท"}
+                                            title={favorites.isSaved(sheet.id) ? "เลิกบันทึกชีท" : "บันทึกชีท"}
+                                        >
+                                            {favorites.isSaved(sheet.id) ? "♥" : "♡"}
+                                        </button>
                                     </div>
                                 </article>
                             ))}

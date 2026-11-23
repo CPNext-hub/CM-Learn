@@ -4,6 +4,7 @@
   "entries": [
     { "idx": 0, "version": "7", "when": 1794816000000, "tag": "0000_initial", "breakpoints": true },
     { "idx": 1, "version": "7", "when": 1795213064729, "tag": "0001_core_schema", "breakpoints": true },
-    { "idx": 2, "version": "7", "when": 1795213074505, "tag": "0002_seed_lookups", "breakpoints": true }
+    { "idx": 2, "version": "7", "when": 1795213074505, "tag": "0002_seed_lookups", "breakpoints": true },
+    { "idx": 3, "version": "7", "when": 1795219200000, "tag": "0003_interactions", "breakpoints": true }
   ]
 }

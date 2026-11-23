@@ -1,0 +1,55 @@
+erDiagram
+    USER ||--o{ SHEETS : owns
+    SUBJECTS ||--o{ SHEETS : classifies
+    CATEGORIES ||--o{ SHEETS : categorizes
+    USER ||--o{ COMMENTS : writes
+    SHEETS ||--o{ COMMENTS : receives
+    COMMENTS o|--o{ COMMENTS : replies_to
+    USER ||--o{ SHEET_REACTIONS : reacts
+    SHEETS ||--o{ SHEET_REACTIONS : receives
+
+    USER {
+        text id PK
+        text name
+        text email UK
+    }
+
+    SUBJECTS {
+        uuid id PK
+        text name UK
+    }
+
+    CATEGORIES {
+        uuid id PK
+        text name UK
+    }
+
+    SHEETS {
+        uuid id PK
+        text owner_id FK
+        uuid subject_id FK
+        uuid category_id FK
+        text title
+        text status
+        bigint view_count
+        timestamptz deleted_at
+    }
+
+    COMMENTS {
+        uuid id PK
+        uuid sheet_id FK
+        text author_id FK
+        uuid parent_comment_id FK "nullable"
+        text body
+        timestamptz created_at
+        timestamptz updated_at
+        timestamptz deleted_at
+    }
+
+    SHEET_REACTIONS {
+        text user_id PK, FK
+        uuid sheet_id PK, FK
+        text reaction "like or dislike"
+        timestamptz created_at
+        timestamptz updated_at
+    }

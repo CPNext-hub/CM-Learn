@@ -93,9 +93,14 @@ export default function MySheetsPage() {
               ชีตของฉัน<small>จัดการชีตที่คุณสร้างและอัปโหลด</small>
             </span>
           </h1>
-          <Link className="action-button" href="/upload">
-            <Icon name="plus" size={16} /> บันทึกชีตใหม่
-          </Link>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Link className="action-button" href="/my-sheets/saved">
+              ♥ ชีทที่บันทึกไว้
+            </Link>
+            <Link className="action-button" href="/upload">
+              <Icon name="plus" size={16} /> บันทึกชีตใหม่
+            </Link>
+          </div>
         </div>
         {message && (
           <p className="upload-success" role="status">

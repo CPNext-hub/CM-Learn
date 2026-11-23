@@ -5,8 +5,11 @@ function compact(value: number) {
   return value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
 }
 
-// Hidden (no backend data): page count, "verified", fake ribbons ("อ่านง่าย 98%"), download count, save button.
-export function FeaturedSheetCard({ sheet }: { sheet: HomeSheet }) {
+// Hidden (no backend data): page count, "verified", fake ribbons ("อ่านง่าย 98%"), download count.
+// The "save" button (featured cards, as in FE01's design) uses BE02 favorites via the page.
+type SaveProps = { saved?: boolean; onToggleSave?: () => void; saving?: boolean };
+
+export function FeaturedSheetCard({ sheet, saved = false, onToggleSave, saving = false }: { sheet: HomeSheet } & SaveProps) {
   return (
     <article className="featured-card">
       <Link href={`/sheets/${sheet.id}`} className="featured-image" style={sheet.thumbnailUrl ? { backgroundImage: `linear-gradient(180deg,transparent,#241c29aa),url(${sheet.thumbnailUrl})` } : undefined}>
@@ -18,7 +21,14 @@ export function FeaturedSheetCard({ sheet }: { sheet: HomeSheet }) {
         <div className="sheet-tags"><span>{sheet.category}</span></div>
         <Link href={`/sheets/${sheet.id}`} className="featured-title">{sheet.title}</Link>
         <div className="sheet-author"><span className="sd-avatar">{sheet.author.name.slice(0, 1)}</span><span>{sheet.author.name}</span><span className="sheet-metrics">◉ {compact(sheet.views)} &nbsp; ♥ {compact(sheet.likes)}</span></div>
-        <div className="sd-card-actions"><Link href={`/sheets/${sheet.id}`}>◉ ดูชีท</Link></div>
+        <div className="sd-card-actions">
+          <Link href={`/sheets/${sheet.id}`}>◉ ดูชีท</Link>
+          {onToggleSave && (
+            <button type="button" onClick={onToggleSave} disabled={saving} aria-pressed={saved} aria-label={saved ? "เลิกบันทึกชีท" : "บันทึกชีท"}>
+              {saved ? "♥ บันทึกแล้ว" : "♡ บันทึก"}
+            </button>
+          )}
+        </div>
       </div>
     </article>
   );

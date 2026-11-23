@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/HomeNavbar";
 import { Footer } from "@/components/home/HomeFooter";
 import { FeaturedSheetCard, LatestSheetCard } from "@/components/home/sheet-card";
+import { useFavorites } from "@/components/interactions/useInteractions";
 import { getHomePageData, searchHomeSheets } from "@/services/homeService";
 import type { HomePageData, HomeSheet } from "@/types/home";
 import "./home.css";
@@ -14,6 +15,7 @@ const ALL = "";
 // Home (FE01 design) — all numbers and sheets come from /api/v1 (see services/homeService).
 // Hidden until a backend exists: user count, rating, "Top 3 creators", Helpful points, fake hashtag suggestions.
 export default function HomePage() {
+  const favorites = useFavorites(); // save buttons on featured cards (BE02)
   const [data, setData] = useState<HomePageData | null>(null);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState(""); // the query that was actually submitted
@@ -86,7 +88,7 @@ export default function HomePage() {
         <section className="featured-section" id="featured">
           <div className="section-wrap">
             <div className="sd-section-heading"><div><span className="section-pill">◎ ยอดนิยม</span><h2>ชีทสรุปที่มีคนเปิดดูมากที่สุด</h2><p>เรียงตามยอดเข้าชมของชีทที่เผยแพร่ 💫</p></div></div>
-            <div className="featured-grid">{featured.map((sheet) => <FeaturedSheetCard key={sheet.id} sheet={sheet} />)}</div>
+            <div className="featured-grid">{featured.map((sheet) => <FeaturedSheetCard key={sheet.id} sheet={sheet} saved={favorites.isSaved(sheet.id)} saving={favorites.busyId === sheet.id} onToggleSave={() => favorites.toggle(sheet.id)} />)}</div>
           </div>
         </section>
       )}

@@ -2,24 +2,53 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 import type { Sheet, RelatedSheet } from "@/types/sheet";
+import type { Reaction } from "@/types/interaction";
 import { getSheet, getRelatedSheets } from "@/services/sheetService";
+import { toggleReaction } from "@/services/interactionService";
 import { initials, sizeLabel } from "@/lib/api-client";
+import SheetComments from "@/components/interactions/SheetComments";
+import { useFavorites, useViewer } from "@/components/interactions/useInteractions";
 
-// Sheet Detail (FE01 design) — data from GET /api/v1/sheets/:id; related sheets from the same subject.
-// Hidden until the backend has them: page thumbnails / page count, word count, subject code, tags,
-// "verified" badge, outline & reading tips, save, follow, the "useful / easy / exam-ready" reactions,
-// download counter, comment form & list (Comment/Like API = BE02, in progress).
+// Sheet Detail (FE01 design) — data from GET /api/v1/sheets/:id (BE01); related sheets from the same subject.
+// Like/Dislike, save (favorites) and comments + replies come from BE02's Interaction API.
+// Hidden because the backend has no data for them: page thumbnails / page count, word count, subject code,
+// tags, "verified" badge, outline & reading tips, follow, the "useful / easy / exam-ready" reactions,
+// download counter, comment likes.
 export default function SheetDetailPage() {
   const params = useParams();
   const id = params.id as string;
+  const router = useRouter();
+  const viewer = useViewer();
+  const favorites = useFavorites();
 
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [related, setRelated] = useState<RelatedSheet[]>([]);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
+  const [reactionBusy, setReactionBusy] = useState(false);
+  const [reactionError, setReactionError] = useState("");
+  const [commentCount, setCommentCount] = useState<number | null>(null);
+
+  async function handleReaction(clicked: Reaction) {
+    if (!sheet || reactionBusy) return;
+    if (viewer.ready && !viewer.userId) {
+      router.push("/login");
+      return;
+    }
+    setReactionBusy(true);
+    setReactionError("");
+    try {
+      const next = await toggleReaction(sheet.id, clicked, { likes: sheet.stats.likes, dislikes: sheet.stats.dislikes, mine: sheet.myReaction });
+      setSheet((prev) => prev && { ...prev, myReaction: next.mine, stats: { ...prev.stats, likes: next.likes, dislikes: next.dislikes } });
+    } catch (err) {
+      setReactionError(err instanceof Error ? err.message : "กดถูกใจไม่สำเร็จ กรุณาลองอีกครั้ง");
+    } finally {
+      setReactionBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!id) return;
@@ -139,12 +168,24 @@ export default function SheetDetailPage() {
                       ดาวน์โหลด {sheet.fileType}
                     </a>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => favorites.toggle(sheet.id)}
+                    disabled={favorites.busyId === sheet.id}
+                    className={`rounded-xl border py-2.5 text-xs font-semibold transition disabled:opacity-60 ${favorites.isSaved(sheet.id)
+                      ? "border-[#883d5e]/30 bg-[#883d5e]/10 text-[#883d5e]"
+                      : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50"
+                      }`}
+                  >
+                    {favorites.isSaved(sheet.id) ? "บันทึกชีทแล้ว" : "บันทึกชีท"}
+                  </button>
                   {sheet.isOwner && (
                     <Link href={`/my-sheets/${sheet.id}/edit`} className="flex items-center justify-center rounded-xl border border-zinc-200 bg-white py-2.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-50">
                       แก้ไขชีทของฉัน
                     </Link>
                   )}
                 </div>
+                {favorites.error && <p className="text-xs text-red-500">{favorites.error}</p>}
               </div>
             </div>
           </div>
@@ -200,33 +241,49 @@ export default function SheetDetailPage() {
               </div>
             </article>
 
-            {/* REACTIONS (counts only until the BE02 Reaction API exists) */}
+            {/* REACTIONS: click to like / dislike, click again to remove (BE02) */}
             <article className="sheet-surface rounded-2xl p-6 sm:p-7">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold text-zinc-900">ผลตอบรับจากนักศึกษา</h2>
                 <span className="text-xs text-zinc-500">ผู้เข้าชม {sheet.stats.views.toLocaleString()} ครั้ง</span>
               </div>
               <div className="mt-4 grid grid-cols-2 gap-2.5">
-                <div className={`rounded-xl border p-3.5 ${sheet.myReaction === "like" ? "border-[#883d5e]/30 bg-[#883d5e]/8" : "border-zinc-200/70 bg-zinc-50/70"}`}>
-                  <span className="block text-xs text-zinc-500">ถูกใจ</span>
-                  <span className="mt-1 block text-base font-bold text-zinc-900">{sheet.stats.likes.toLocaleString()}</span>
-                </div>
-                <div className={`rounded-xl border p-3.5 ${sheet.myReaction === "dislike" ? "border-[#883d5e]/30 bg-[#883d5e]/8" : "border-zinc-200/70 bg-zinc-50/70"}`}>
-                  <span className="block text-xs text-zinc-500">ไม่ถูกใจ</span>
-                  <span className="mt-1 block text-base font-bold text-zinc-900">{sheet.stats.dislikes.toLocaleString()}</span>
-                </div>
+                {([
+                  { key: "like", label: "ถูกใจ", count: sheet.stats.likes },
+                  { key: "dislike", label: "ไม่ถูกใจ", count: sheet.stats.dislikes },
+                ] as const).map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => handleReaction(item.key)}
+                    disabled={reactionBusy}
+                    aria-pressed={sheet.myReaction === item.key}
+                    className={`rounded-xl border p-3.5 text-left transition disabled:opacity-60 ${sheet.myReaction === item.key
+                      ? "border-[#883d5e]/30 bg-[#883d5e]/8"
+                      : "border-zinc-200/70 bg-zinc-50/70 hover:bg-zinc-100/70"
+                      }`}
+                  >
+                    <span className="block text-xs text-zinc-500">{item.label}{sheet.myReaction === item.key && " (คุณ)"}</span>
+                    <span className="mt-1 block text-base font-bold text-zinc-900">{item.count.toLocaleString()}</span>
+                  </button>
+                ))}
               </div>
-              <p className="mt-3 text-xs text-zinc-400">ปุ่มกดถูกใจ / ไม่ถูกใจ จะเปิดใช้เมื่อ API ของ BE02 พร้อม</p>
+              {reactionError ? (
+                <p className="mt-3 text-xs text-red-500">{reactionError}</p>
+              ) : (
+                viewer.ready && !viewer.userId && <p className="mt-3 text-xs text-zinc-400">เข้าสู่ระบบเพื่อกดถูกใจ / ไม่ถูกใจ</p>
+              )}
             </article>
           </div>
         </section>
 
-        {/* COMMENTS (notice until the BE02 Comment API exists) */}
+        {/* COMMENTS (BE02) */}
         <section className="sheet-surface mt-9 rounded-2xl p-6 sm:p-7">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-base font-bold text-zinc-900">ความคิดเห็นและการพูดคุย ({sheet.stats.comments})</h2>
+            <h2 className="text-base font-bold text-zinc-900">ความคิดเห็นและการพูดคุย ({commentCount ?? sheet.stats.comments})</h2>
+            <span className="text-xs text-zinc-500">เรียงจากเก่าไปใหม่</span>
           </div>
-          <p className="py-8 text-center text-sm text-zinc-400">ระบบความคิดเห็นกำลังพัฒนา (เปิดใช้เมื่อ API ของ BE02 พร้อม)</p>
+          <SheetComments sheetId={sheet.id} sheetAuthorId={sheet.author.id} onCountChange={setCommentCount} />
         </section>
 
         {/* RELATED SHEETS */}
