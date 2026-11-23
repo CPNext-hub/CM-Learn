@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { getDiscoverySheets } from "@/services/discoveryService";
 import { initials, loadLookups, type Lookup } from "@/lib/api-client";
+import { useFavorites } from "@/components/interactions/useInteractions";
 
 import type {
     DiscoverySheet,
@@ -18,9 +19,11 @@ const initialFilters: DiscoveryFilters = { subjectId: "", categoryId: "" };
 
 // Search & filter (FE01 design) — data from GET /api/v1/sheets.
 // Hidden until the backend has the data: university, faculty, exam type, "verified PDF", GoodNotes,
-// "popular ≥ 1,000 downloads" filters, rating / downloads sorting, rating & favourite on cards,
+// "popular ≥ 1,000 downloads" filters, rating / downloads sorting, rating & save count on cards,
 // satisfaction score in the hero, the "recently opened" promotion.
+// The save (♡) button on each card uses BE02 favorites.
 export default function DiscoveryClient() {
+    const favorites = useFavorites();
     const [keyword, setKeyword] = useState("");
     const [searchInput, setSearchInput] = useState("");
     const [filters, setFilters] = useState<DiscoveryFilters>(initialFilters);
@@ -288,6 +291,18 @@ export default function DiscoveryClient() {
                                                 <span>เข้าชม {formatCount(sheet.views)} ครั้ง · ♥ {formatCount(sheet.likes)}</span>
                                             </div>
                                         </div>
+
+                                        {/* Save (BE02 favorites). No per-sheet save count exists, so only the state is shown. */}
+                                        <button
+                                            type="button"
+                                            className={`${styles.favoriteButton} ${favorites.isSaved(sheet.id) ? styles.favoriteActive : ""}`}
+                                            onClick={() => favorites.toggle(sheet.id)}
+                                            disabled={favorites.busyId === sheet.id}
+                                            aria-label={favorites.isSaved(sheet.id) ? "เลิกบันทึกชีท" : "บันทึกชีท"}
+                                            title={favorites.isSaved(sheet.id) ? "เลิกบันทึกชีท" : "บันทึกชีท"}
+                                        >
+                                            {favorites.isSaved(sheet.id) ? "♥" : "♡"}
+                                        </button>
                                     </div>
                                 </article>
                             ))}
