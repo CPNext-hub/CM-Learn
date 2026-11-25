@@ -13,6 +13,9 @@
     "db:studio": "drizzle-kit studio",
     "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "test:smoke": "node --env-file=.env scripts/smoke-test.mjs"
   },
   "dependencies": {
@@ -29,11 +32,13 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitest/coverage-v8": "^5.1.1",
     "drizzle-kit": "^0.31.0",
     "eslint": "^9.0.0",
     "eslint-config-next": "^15.3.0",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.8.0",
+    "vitest": "^5.1.1",
     "wrangler": "^4.0.0"
   }
 }
