@@ -5,7 +5,7 @@ import { getSheetDtos } from "@/lib/sheets";
 type Context = { params: Promise<{ path?: string[] }> };
 type Viewer = { id: string } | null;
 const ok = (data: unknown, status = 200) => Response.json({ data }, { status });
-const bad = (message: string, status = 400) => Response.json({ error: { code: status === 401 ? "UNAUTHORIZED" : status === 404 ? "NOT_FOUND" : status === 409 ? "CONFLICT" : "VALIDATION_ERROR", message } }, { status });
+const bad = (message: string, status = 400) => Response.json({ error: { code: status === 401 ? "UNAUTHORIZED" : status === 404 ? "NOT_FOUND" : status === 409 ? "CONFLICT" : status === 500 ? "INTERNAL_ERROR" : "VALIDATION_ERROR", message } }, { status });
 
 async function getViewer(request: Request): Promise<Viewer> {
   const session = await getSessionUser(request);
@@ -158,6 +158,7 @@ async function dispatch(request: Request, context: Context) {
       const input = await jsonBody(request);
       const sheetId = typeof input?.sheetId === "string" ? input.sheetId : "";
       if (!sheetId) return bad("sheetId is required.");
+      if (!isUuid(sheetId)) return bad("Sheet not found.", 404);
       const owns = await db`select id from collections where id = ${path[1]} and owner_id = ${user.id}`;
       if (!owns.length) return bad("Collection not found.", 404);
       if (!(await sheetVisible(sheetId, user.id))) return bad("Sheet not found.", 404);
