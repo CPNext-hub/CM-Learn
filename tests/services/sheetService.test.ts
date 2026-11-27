@@ -94,8 +94,67 @@ describe("sheetService", () => {
 
             await expect(getSheet("sheet-001")).rejects.toThrow("ไม่พบข้อมูล");
         });
+
+        test("รองรับข้อมูลที่ไม่มี description, file และ viewer", async () => {
+            const incompleteSheet: ApiSheet = {
+                ...mockApiSheet,
+                description: null,
+                subject: null,
+                category: null,
+                file: null,
+                viewer: undefined,
+            };
+
+            mockFetch({
+                "/api/v1/sheets/sheet-001": {
+                    data: incompleteSheet,
+                },
+            });
+
+            const result = await getSheet("sheet-001");
+
+            expect(result).toMatchObject({
+                description: "",
+                subjectId: null,
+                category: "ทั่วไป",
+                fileType: "",
+                fileName: mockApiSheet.title,
+                fileSize: 0,
+                isImage: false,
+                myReaction: null,
+                isOwner: false,
+            });
+        });
+
+        test("ตรวจสอบไฟล์รูปภาพ", async () => {
+            const imageSheet: ApiSheet = {
+                ...mockApiSheet,
+                file: {
+                    mimeType: "image/png",
+                    sizeBytes: 4096,
+                    versionNo: 1,
+                },
+            };
+
+            mockFetch({
+                "/api/v1/sheets/sheet-001": {
+                    data: imageSheet,
+                },
+            });
+
+            const result = await getSheet("sheet-001");
+
+            expect(result).toMatchObject({
+                fileType: "PNG",
+                fileName: `${mockApiSheet.title}.png`,
+                fileSize: 4096,
+                isImage: true,
+            });
+        });
+
     });
 
+    
     describe("getRelatedSheets", () => {
         test("ไม่มี subjectId ต้องคืน array ว่าง", async () => {
             const fetchMock = mockFetch({});
@@ -110,29 +169,30 @@ describe("sheetService", () => {
             expect(fetchMock).not.toHaveBeenCalled();
         });
 
+        test("เมื่อ API ไม่มีชีทอื่นที่เกี่ยวข้อง ต้องคืน array ว่าง", async () => {
+            mockFetch({
+                "/api/v1/sheets": {
+                    data: [mockApiSheet],
+                },
+            });
+
+            const sheet = {
+                id: "sheet-001",
+                subjectId: "subject-001",
+            } as Sheet;
+
+            const result = await getRelatedSheets(sheet);
+
+            expect(result).toEqual([]);
+        });
+
         test("กรองชีทปัจจุบันและคืนชีทที่เกี่ยวข้องไม่เกิน 3 รายการ", async () => {
             const relatedData = [
                 mockApiSheet,
-                {
-                    ...mockApiSheet,
-                    id: "sheet-002",
-                    title: "ชีทที่ 2",
-                },
-                {
-                    ...mockApiSheet,
-                    id: "sheet-003",
-                    title: "ชีทที่ 3",
-                },
-                {
-                    ...mockApiSheet,
-                    id: "sheet-004",
-                    title: "ชีทที่ 4",
-                },
-                {
-                    ...mockApiSheet,
-                    id: "sheet-005",
-                    title: "ชีทที่ 5",
-                },
+                { ...mockApiSheet, id: "sheet-002", title: "ชีทที่ 2" },
+                { ...mockApiSheet, id: "sheet-003", title: "ชีทที่ 3" },
+                { ...mockApiSheet, id: "sheet-004", title: "ชีทที่ 4" },
+                { ...mockApiSheet, id: "sheet-005", title: "ชีทที่ 5" },
             ];
 
             mockFetch({
@@ -142,10 +202,8 @@ describe("sheetService", () => {
             });
 
             const sheet = {
-                ...{
-                    id: "sheet-001",
-                    subjectId: "subject-001",
-                },
+                id: "sheet-001",
+                subjectId: "subject-001",
             } as Sheet;
 
             const result = await getRelatedSheets(sheet);
@@ -158,7 +216,7 @@ describe("sheetService", () => {
             ]);
             expect(result[0]).toMatchObject({
                 title: "ชีทที่ 2",
-                subjectName: "ฟิสิกส์",
+                subjectName: mockApiSheet.subject?.name,
                 thumbnailUrl: null,
                 views: 10,
                 likes: 5,
