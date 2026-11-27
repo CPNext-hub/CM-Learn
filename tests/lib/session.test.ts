@@ -1,5 +1,5 @@
 // src/lib/session.ts — ดูว่าใครล็อกอินอยู่ ฝั่งหน้าเว็บที่ render บน server (เช่น หน้า /admin)
-// ก. getSession  ข. requireUser  ค. requireAdmin  ง. บัญชีที่ถูกลบ (bug ที่พบ — test.fails)
+// ก. getSession  ข. requireUser  ค. requireAdmin  ง. บัญชีที่ถูกลบ = guest
 //
 // headers() ของ next/headers ใช้ได้เฉพาะตอน Next.js render จริง → mock ให้คืน cookie ที่เราตั้งเอง
 // vi.mock ถูกย้ายไปบนสุดของไฟล์ จึงเก็บค่า cookie ใน vi.hoisted (ดู tests/README.md หัวข้อ 4)
@@ -90,11 +90,10 @@ describe("requireAdmin", () => {
 // ---------------------------------------------------------------------------
 
 describe("บัญชีที่ถูกลบ (deletedAt)", () => {
-  // BUG ที่พบ (วันที่ 2): api.ts getSessionUser() ถือว่าบัญชีที่ถูกลบเป็น guest แต่ session.ts ไม่ตรวจ deletedAt
-  // → บัญชีที่ถูกลบ (รวม admin) ยังได้ session จาก cookie เดิม และยังผ่าน requireAdmin() / หน้า /admin ได้
-  // test นี้คาดหวังพฤติกรรมที่ถูก (null) จึงใช้ test.fails = "ตอนนี้ยังล้มอยู่ตามที่รู้"
-  // เมื่อแก้ session.ts แล้ว test นี้จะเปลี่ยนเป็นล้ม → ให้เปลี่ยน test.fails กลับเป็น test
-  test.fails("บัญชี admin ถูกลบแต่ cookie ยังใช้ได้ → getSession / requireUser / requireAdmin ควรได้ null", async () => {
+  // เคยเป็น bug (พบวันที่ 2): session.ts ไม่ตรวจ deletedAt → บัญชีที่ถูกลบ (รวม admin) ยังได้ session
+  // และยังผ่าน requireAdmin() / หน้า /admin ได้ · แก้แล้ว: getSession() ถือว่าบัญชีที่ถูกลบเป็น guest
+  // เหมือน getSessionUser() ใน api.ts
+  test("บัญชี admin ถูกลบแต่ cookie ยังใช้ได้ → getSession / requireUser / requireAdmin ได้ null", async () => {
     const admin = await signUpUser({ name: "Deleted Admin" });
     await testDb().update(user).set({ role: "admin", deletedAt: new Date() }).where(eq(user.id, admin.id));
     mocks.cookie = admin.cookie;
