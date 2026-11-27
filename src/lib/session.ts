@@ -1,9 +1,12 @@
 import { headers } from "next/headers";
 import { getAuth } from "@/lib/auth";
 
+/** Current session for server-rendered pages, or null for guests. Soft-deleted accounts are guests (same rule as lib/api.ts). */
 export async function getSession() {
   const auth = await getAuth();
-  return auth.api.getSession({ headers: await headers() });
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session || session.user.deletedAt) return null;
+  return session;
 }
 
 export async function requireUser() {
