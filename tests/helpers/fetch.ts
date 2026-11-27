@@ -16,7 +16,7 @@ const isStatusReply = (r: unknown): r is { status: number; body: unknown } =>
  * A URL that is not listed answers 404.
  */
 export function mockFetch(routes: Record<string, FakeResponse>) {
-  const fn = vi.fn(async (input: RequestInfo | URL) => {
+  const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     const reply = routes[url] ?? routes[url.split("?")[0]];
     if (reply instanceof Error) throw reply;
